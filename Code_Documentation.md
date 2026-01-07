@@ -1,6 +1,14 @@
 # **REPO-CRAFTER CODE DOCUMENTATION**
 
-**Version**: 1.0 (Generic Platform Edition)
+
+<!--
+Code Documentation for repo-crafter
+Copyright (C) 2026 Dharrun Singh .M
+SPDX-License-Identifier: CC-BY-SA-4.0
+This work is licensed under the Creative Commons Attribution-ShareAlike 4.0 International License.
+To view a copy of this license, visit https://creativecommons.org/licenses/by-sa/4.0/.
+-->
+
 **Architecture**: Single-file bash script with external config
 **Entry Point**: `main()` → `main_menu()` loop
 
