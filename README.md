@@ -1,9 +1,17 @@
 # Interactive-git-helper-shell-script
 
-<div style="background-color: #ffbf00; border-left: 4px solid #ffbf00; padding: 16px; margin: 20px 0; border-radius: 6px; color: #000000;">
-<strong style="color: #000000;">🛑 Caution</strong><br>
-<span style="color: #ffffff;">Although this code has been reviewed, it has been tailored with AI LLM assistance and some features still require testing, so still under development. The code has to be refactored further. Please review the code thoroughly before use. You can refer to the other documentation files if necessary.</span>
-</div>
+> [!CAUTION]
+> Although this code has been reviewed, it has been tailored with AI LLM assistance and some features still require testing, so it is still under development. The code has to be refactored further.  
+> **Please review the code thoroughly before use.** You can refer to the other documentation files if necessary.
+
+The README.md would be gradually edited and updated.
+
+Documentations you can use;
+
+- Code Documentation : for debugging or easy understanding of script
+- User Manual : to understand and ease of use for Interactions with the script.
+- Also refer platform.conf for your setup.
+- View below diagrams for easy visualization, but there might be mistakes, which will also be resolved gradually.
 
 ## Navigation flow diagram
 
@@ -152,7 +160,7 @@ flowchart TD
 ```
 
 ## Issues and Contact
-I am not fully available, although you can email me, but I cannot respond immediately, the cycle of improvement and issues would be over a month. For those who are willing to file an issue in GitHub, please file all issues you have in mind instead of separately filling issues for each problem, so that it collect everything exhaustively, and also avoid to file similar issues, Either comment in exisitng issue or leave as is. Thank you for your understanding.
+I am not fully available, although you can email me, but I cannot respond immediately, the cycle of improvement and issues tracking would be over a month. For those who are willing to file an issue in GitHub, please file all issues collectively you believe about the functioning of script, such as vulnerabilities, bugs, feature-request, etc., instead of separately filling issues for each problem, that is collectively everything exhaustively, and also avoid to file similar issues, Either comment in exisitng issue or leave as is. Thank you for your understanding.
 
 ## License
 
