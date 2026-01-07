@@ -1,8 +1,26 @@
 #!/usr/bin/env bash
+
+# Interactive-git-help-shell-script - An interactive script to facilitate your git operations
+# Copyright (C) 2026  Dharrun Singh .M
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
 # =============================================================================
 # repo-crafter.sh - A safe, interactive Git repository manager for GitHub & GitLab
 # =============================================================================
-set -euo pipefail 
+set -euo pipefail
 
 # ======================= CONFIGURATION & GLOBALS =============================
 # Restricted directories
@@ -53,7 +71,7 @@ load_platform_config() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
         echo -e "${RED}❌ Configuration file 'platforms.conf' not found.${NC}"
         echo ""
-        echo "Please create a 'platforms.conf' file in the usual config folder with the script's name:"
+        echo "Please create a 'platforms.conf' file in the same directory as this script:"
         echo -e "${YELLOW}  $CONFIG_DIR/platforms.conf${NC}"
         echo ""
         echo "With content like this example:"
@@ -96,7 +114,7 @@ EOF
                       PLATFORM_REPO_CHECK_SUCCESS_KEY \ PLATFORM_AUTH_HEADER \
                       PLATFORM_PAYLOAD_TEMPLATE \ PLATFORM_SSH_URL_TEMPLATE \
                       PLATFORM_DISPLAY_FORMAT \
-                      PLATFORM_WORK_DIR ; do
+                      PLATFORM_WORK_DIR ; do # You can also add # PLATFORM_AUTH_HEADER_OVERRIDES \PLATFORM_AUTH_QUERY_PARAM
         declare -gA "$array_name"
     done
 
@@ -861,6 +879,7 @@ _create_local_only() {
   execute_safe "Create project directory" mkdir -p "$dest_dir"
   execute_safe "Change to project directory" cd "$dest_dir"
   execute_safe "Initialize git repository" git init -b main
+  remove_existing_remotes # removes remote to keep the project locally isolated
   execute_safe "Create README.md" sh -c "echo '# $project_name' > README.md"
   git add README.md && git commit -m "Initial commit" >/dev/null
 
@@ -1243,8 +1262,30 @@ EOF
 }
 
 # ======================= UTILITY HELPERS ==========================
-# Pausing for viewer during dry-run
+# Helper: Check and remove any existing remotes (for local-only projects)
+remove_existing_remotes() {
+    local remotes
+    remotes=$(git remote 2>/dev/null)
 
+    if [[ -n "$remotes" ]]; then
+        echo ""
+        echo -e "${YELLOW}⚠️  Existing remotes detected in this local project:${NC}"
+        git remote -v
+
+        if confirm_action "Remove all remotes to make project truly local-only?" "n" "Remove remotes"; then
+            git remote | while read -r remote; do
+                execute_dangerous "Remove remote $remote" git remote remove "$remote"
+            done
+            return 0
+        else
+            echo -e "${YELLOW}⚠️  Keeping existing remotes (not truly local-only)${NC}"
+            return 1
+        fi
+    fi
+    return 0  # No remotes found, proceed normally
+}
+
+# Pausing for viewer during dry-run
 _pause_if_dry_run() {
     if [[ "$DRY_RUN" == "true" ]]; then
         echo -e "\n${YELLOW}=== DRY-RUN COMPLETE ===${NC}"
@@ -1418,7 +1459,7 @@ main_menu() {
     while true; do
         clear
         echo -e "${BLUE}╔══════════════════════════════════════╗${NC}"
-        echo -e "${BLUE}║     /   REPO-CRAFTER v0.1.0    \     ║${NC}"
+        echo -e "${BLUE}║     /   REPO-CRAFTER v0.1.1    \     ║${NC}"
         echo -e "${BLUE}║     | Generic Platform Edition |     ║${NC}"
         echo -e "${BLUE}╚══════════════════════════════════════╝${NC}"
         echo -e "${RED}⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️⚡️${NC}"

@@ -1,6 +1,13 @@
 # **REPO-CRAFTER USER MANUAL**
 
-**Version**: 1.0 (Generic Platform Edition)  
+<!--
+User Manual for repo-crafter
+Copyright (C) 2026 Dharrun Singh
+SPDX-License-Identifier: CC-BY-4.0
+This work is licensed under the Creative Commons Attribution 4.0 International License.
+To view a copy of this license, visit https://creativecommons.org/licenses/by/4.0/.
+-->
+
 **Purpose**: Safe, interactive Git repository management for solo developers
 
 ---
