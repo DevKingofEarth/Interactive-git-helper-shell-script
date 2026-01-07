@@ -160,7 +160,9 @@ flowchart TD
 ```
 
 ## Issues and Contact
-I am not fully available, although you can email me, but I cannot respond immediately, the cycle of improvement and issues tracking would be over a month. For those who are willing to file an issue in GitHub, please file all issues collectively you believe about the functioning of script, such as vulnerabilities, bugs, feature-request, etc., instead of separately filling issues for each problem, that is collectively everything exhaustively, and also avoid to file similar issues, Either comment in exisitng issue or leave as is. Thank you for your understanding.
+I am not fully available, although you can email me, but I cannot respond immediately, the cycle of improvement and issues tracking would be over a month. 
+For those who are willing to file an issue in GitHub/GitLab, please file all issues collectively you believe about the functioning of script, such as vulnerabilities, bugs, feature-request, etc., instead of separately filling issues for each problem, that is collectively everything exhaustively, and also avoid to file similar issues, Either comment in exisitng issue or leave as is. 
+Thank you for your understanding.
 
 ## License
 
