@@ -1,8 +1,8 @@
 # Interactive-git-helper-shell-script
 
-<div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 12px; margin: 16px 0; border-radius: 4px;">
-<strong>Caution</strong><br>
-Although code being reviewed, it has been tailored with AI LLM assistance and there are still some features that needs testing. Please review the code before use, You can use other documentations if necessary. 
+<div style="background-color: #ffbf00; border-left: 4px solid #ffbf00; padding: 16px; margin: 20px 0; border-radius: 6px; color: #000000;">
+<strong style="color: #000000;">🛑 Caution</strong><br>
+<span style="color: #ffffff;">Although this code has been reviewed, it has been tailored with AI LLM assistance and some features still require testing, so still under development. The code has to be refactored further. Please review the code thoroughly before use. You can refer to the other documentation files if necessary.</span>
 </div>
 
 ## Navigation flow diagram
@@ -92,98 +92,67 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Start[Script Start] --> MainFunc[main function]
-    
-    MainFunc --> CheckTools{Check essential tools?}
-    CheckTools -->|Yes: git, curl, jq, ssh| LoadConfig[load_platform_config]
-    CheckTools -->|No| Error[Exit with error]
-    
-    LoadConfig --> ParseConfig[Parse platforms.conf]
-    ParseConfig --> PopulateArrays[Populate Platform Arrays<br/>e.g., PLATFORM_API_BASE]
-    PopulateArrays --> BuildList[Build AVAILABLE_PLATFORMS list]
-    BuildList --> ConfigTest{User runs config test?}
-    
-    ConfigTest -->|Yes via --test flag| TestFlow[test_platform_config]
-    ConfigTest -->|No / Continue| SafetyCheck[is_safe_directory]
-    SafetyCheck -->|Not Safe| ExitError[Exit: Unsafe directory]
-    SafetyCheck -->|Safe| ShowStatus[Show platform token status]
-    ShowStatus --> LaunchMenu[main_menu loop]
+    A["main()"] --> B["check essential tools"]
+    B --> C["load_platform_config()"]
+    C --> D["Parse platforms.conf"]
+    D --> E["Populate platform arrays<br/>PLATFORM_API_BASE, etc."]
+    E --> F["Build AVAILABLE_PLATFORMS list"]
+    F --> G["is_safe_directory()"]
+    G --> H["main_menu() loop"]
 
-    LaunchMenu --> UserChoice{User Menu Choice}
+    H --> I{"User selects option"}
+
+    I -- "Option 1" --> J["create_new_project_workflow()"]
+    I -- "Option 2" --> K["convert_local_to_remote_workflow()"]
+    I -- "Option 3" --> L["convert_remote_to_local_workflow()"]
+    I -- "Option 4" --> M["manage_project_workflow()"]
+    I -- "Option 5" --> N["list_remote_repos_workflow()"]
+    I -- "Option 6" --> O["gitignore_maker_interactive()"]
+    I -- "Option 7" --> P["test_platform_config()"]
+    I -- "Option 8" --> Q["Exit"]
+
+    J --> J1["_create_with_new_remote()<br/>_clone_existing_remote()<br/>_create_local_only()"]
+    K --> K1["_select_project_from_dir()"]
+    K1 --> K2["select_platforms()"]
+    K2 --> K3["Add git remote(s)"]
     
-    UserChoice -->|1| CreateFlow[create_new_project_workflow]
-    CreateFlow --> ChooseType{Create Type?}
-    ChooseType -->|1. New Local+Remote| _create_with_new_remote
-    ChooseType -->|2. Clone Existing| _clone_existing_remote
-    ChooseType -->|3. Local Only| _create_local_only
-    
-    _create_with_new_remote --> Steps1[1. _prompt_project_name]
-    Steps1 --> Steps2[2. select_platforms]
-    Steps2 --> Steps3[3. warn_duplicate_repo_name]
-    Steps3 --> Steps4[4. warn_similar_remote_repos]
-    Steps4 --> Steps5[5. _prompt_visibility]
-    Steps5 --> Steps6[6. mkdir, git init, README]
-    Steps6 --> Steps7[7. gitignore_maker]
-    Steps7 --> LoopPlatforms[For each platform:]
-    LoopPlatforms --> API_Create[create_remote_repo]
-    API_Create --> GenericCall[platform_api_call]
-    GenericCall --> CurlExec[Curl with auth header]
-    CurlExec --> ParseResp[Parse JSON for SSH URL]
-    ParseResp --> AddRemote[git remote add]
-    AddRemote --> GitPush[git add, commit, push]
-    GitPush --> EndCreate[✅ Project Created]
-    
-    UserChoice -->|2| BindFlow[convert_local_to_remote_workflow]
-    BindFlow --> SelectLocal[_select_project_from_dir]
-    SelectLocal --> ChoosePlatforms[select_platforms]
-    ChoosePlatforms --> MoveDir[Move dir to REMOTE_ROOT]
-    MoveDir --> AddRemotes[Add git remote(s)]
-    
-    UserChoice -->|3| UnbindFlow[convert_remote_to_local_workflow]
-    UnbindFlow --> SelectRemote[_select_project_from_dir]
-    SelectRemote --> Confirm[Confirm removal]
-    Confirm --> RemoveAllRemotes[Remove all git remotes]
-    RemoveAllRemotes --> MoveToLocal[Move dir to LOCAL_ROOT]
-    
-    UserChoice -->|4| DeleteFlow[manage_project_workflow]
-    DeleteFlow --> DeleteChoice{Delete Choice?}
-    DeleteChoice -->|1. Local Copy| _delete_local_copy
-    DeleteChoice -->|2. Unbind| UnbindFlow
-    DeleteChoice -->|3. Both| _delete_both
-    _delete_both --> TypeConfirm{Type name to confirm}
-    TypeConfirm -->|Confirmed| APIDelete[API call to delete remote]
-    APIDelete --> LocalDelete[rm -rf local dir]
-    
-    UserChoice -->|5| ListFlow[list_remote_repos_workflow]
-    ListFlow --> ListPlatforms[select_platforms]
-    ListPlatforms --> ForEachList[For each platform]
-    ForEachList --> API_List[list_remote_repos]
-    API_List --> GenericCall
-    
-    UserChoice -->|6| GitignoreFlow[gitignore_maker_interactive]
-    GitignoreFlow --> _select_and_template_files
-    
-    UserChoice -->|7| TestFlow
-    TestFlow --> TokenCheck[Check token env vars]
-    TokenCheck --> SSHCheck[check_ssh_auth]
-    SSHCheck --> TestSelect[Test select_platforms]
-    
-    UserChoice -->|8| ExitScript[Exit 0]
-    
-    %% Data Flow Highlights
-    ParseConfig -.->|Populates| Arrays
-    Arrays -.->|Used by| API_Create
-    Arrays -.->|Used by| API_List
-    
-    style Start fill:#e1f5e1
-    style ExitScript fill:#ffebee
-    style EndCreate fill:#e1f5e1
-    style Error fill:#ffebee
-    style ExitError fill:#ffebee
-    style Arrays fill:#f0f8ff
-    style GenericCall fill:#fff0f5
-    style CurlExec fill:#f0fff0
+    L --> L1["_select_project_from_dir()"]
+    L1 --> L2["Remove all git remotes"]
+    L2 --> L3["Move to LOCAL_ROOT"]
+
+    M --> M1["_delete_local_copy()<br/>_delete_both()"]
+    M1 --> M2["platform_api_call()<br/>(DELETE request)"]
+
+    N --> N1["select_platforms()"]
+    N1 --> N2["list_remote_repos()"]
+    N2 --> N3["platform_api_call()"]
+
+    O --> O1["gitignore_maker()"]
+    O1 --> O2["_select_and_template_files()"]
+
+    P --> P1["check_ssh_auth()"]
+    P1 --> P2["select_platforms() test"]
+
+    subgraph API_CALLS ["Core API & Git Operations"]
+        S1["create_remote_repo()"] --> S2["platform_api_call()"]
+        S3["check_remote_exists()"] --> S4["platform_api_call()"]
+        S5["warn_similar_remote_repos()"] --> S6["platform_api_call()"]
+        
+        S2 --> S7["Curl with auth_header<br/>from config"]
+        S7 --> S8["Parse JSON with jq"]
+    end
+
+    J1 --> API_CALLS
+    N3 --> API_CALLS
+    M2 --> API_CALLS
+
+    style A fill:#e1f5e1
+    style Q fill:#ffebee
+    style API_CALLS fill:#f0f8ff,stroke:#333,stroke-width:2px
 ```
+
+## Issues and Contact
+I am not fully available, although you can email me, but I cannot respond immediately, the cycle of improvement and issues would be over a month. For those who are willing to file an issue in GitHub, please file all issues you have in mind instead of separately filling issues for each problem, so that it collect everything exhaustively, and also avoid to file similar issues, Either comment in exisitng issue or leave as is. Thank you for your understanding.
 
 ## License
 
