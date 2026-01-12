@@ -161,25 +161,6 @@ flowchart TD
     M5f --> M5g[Return]
     M6j --> M6m[Return]
 
-    style Start fill:#e1f5e1,stroke:#2e7d32
-    style Test fill:#fff3cd,stroke:#f57c00
-    style Dry fill:#fff3cd,stroke:#f57c00
-    style Help fill:#e3f2fd,stroke:#1976d2
-    style M1j fill:#e1f5e1,stroke:#2e7d32
-    style M2t fill:#e1f5e1,stroke:#2e7d32
-    style M3h fill:#e1f5e1,stroke:#2e7d32
-    style M4e fill:#e1f5e1,stroke:#2e7d32
-    style M4p fill:#ffebee,stroke:#c62828
-    style M6j fill:#e1f5e1,stroke:#2e7d32
-    style M4f fill:#ffebee,stroke:#c62828
-    style M6l fill:#fff3cd,stroke:#f57c00
-    style M2q fill:#fff3cd,stroke:#f57c00
-    style M2e fill:#fff3cd,stroke:#f57c00
-    style M1i fill:#fff3cd,stroke:#f57c00
-    style M2k fill:#fff3cd,stroke:#f57c00
-    style M3g fill:#fff3cd,stroke:#f57c00
-    style M4d fill:#fff3cd,stroke:#f57c00
-    style M6h fill:#fff3cd,stroke:#f57c00
 ```
 
 ## Functional/Processes Flow diagram
@@ -379,21 +360,7 @@ flowchart TD
     W6k --> W6o[Return to Menu]
     W6z --> W6o
 
-    style W1y fill:#fff3cd,stroke:#f57c00
-    style W2ad fill:#fff3cd,stroke:#f57c00
-    style W3g fill:#fff3cd,stroke:#f57c00
-    style W4d fill:#fff3cd,stroke:#f57c00
-    style W6i fill:#fff3cd,stroke:#f57c00
-    style W1k fill:#ffebee,stroke:#c62828
-    style W2aa fill:#ffebee,stroke:#c62828
-    style W4h fill:#ffebee,stroke:#c62828
-    style W4p fill:#ffebee,stroke:#c62828
-    style W2s fill:#fff3cd,stroke:#f57c00
-    style W1v fill:#e1f5e1,stroke:#2e7d32
-    style W2ae fill:#e1f5e1,stroke:#2e7d32
-    style W3h fill:#e1f5e1,stroke:#2e7d32
-    style W4e fill:#e1f5e1,stroke:#2e7d32
-    style W6j fill:#e1f5e1,stroke:#2e7d32
+
 ```    
 ## Issues and Contact
 I am not fully available, although you can email me, but I cannot respond immediately, the cycle of improvement and issues tracking would be over a month. 
