@@ -59,6 +59,8 @@ declare -A PLATFORM_SSH_HOST
 declare -A PLATFORM_REPO_DOMAIN
 declare -A PLATFORM_TOKEN_VAR
 declare -A PLATFORM_AUTH_HEADER
+declare -A PLATFORM_AUTH_HEADER_NAME
+declare -A PLATFORM_AUTH_QUERY_PARAM
 declare -A PLATFORM_REPO_CHECK_ENDPOINT
 declare -A PLATFORM_REPO_CHECK_METHOD
 declare -A PLATFORM_REPO_CHECK_SUCCESS_KEY
@@ -90,8 +92,9 @@ AVAILABLE_PLATFORMS=()
 - `PLATFORM_PAYLOAD_TEMPLATE`: JSON body for repo creation (with placeholders)
 - `PLATFORM_SSH_URL_TEMPLATE`: SSH URL format
 - `PLATFORM_DISPLAY_FORMAT`: How to show repos in list view
-- `PLATFORM_AUTH_HEADER`: Authorization header format
-- `PLATFORM_AUTH_HEADER`: Customizable authorization header format (e.g., `Bearer {token}`, `token {token}`)
+- `PLATFORM_AUTH_HEADER`: Authorization header format. Customizable authorization header format (e.g., `Bearer {token}`, `{token}`)
+- `PLATFORM_AUTH_HEADER_NAME` - Custom authorization header names (like PRIVATE-TOKEN for GitLab)
+- `PLATFORM_AUTH_QUERY_PARAM` - Support for query parameter authentication
 - `PLATFORM_OWNER_NOT_FOUND_PATTERNS`: Comma-separated error message fragments to detect when repo owner doesn't exist
 - `PLATFORM_SSH_URL_FIELDS`: Comma-separated JSON field names to try when extracting SSH URL from API response
 - `PLATFORM_VISIBILITY_MAP`: JSON mapping between script's visibility terms and platform-specific terms
@@ -117,6 +120,8 @@ AVAILABLE_PLATFORMS=()
 - Uses `declare -gA "$array_name"` to create global associative arrays at runtime
 - Config parsing uses regex patterns to match `key = value` syntax
 - Filters platforms where `enabled=true` AND `api_base` is set AND `token_var` is set
+
+**Extended Support**: Config parsing now automatically handles `auth_header_name` and `auth_query_param` keys when present in platform configuration.
 
 **Error Handling**:
 - Config not found → exits with example config snippet
@@ -148,7 +153,9 @@ AVAILABLE_PLATFORMS=()
 
 **Key Design**: Returns list via stdout: `platforms=$(select_platforms "Choose:" "true")`
 
-**Pitfalls**: Invalid input returns exit code 1; callers must handle with `|| return` pattern.
+- **Numeric verification**: Uses regex `[[ ! "$idx" =~ ^[0-9]+$ ]]` to validate input
+- **Bounds checking**: Ensures `valid_idx >= 0 && valid_idx < ${#AVAILABLE_PLATFORMS[@]}`
+- **Error resilience**: Continues processing valid indices even if some are invalid
 
 ---
 
@@ -178,10 +185,21 @@ AVAILABLE_PLATFORMS=()
 - **Used by**: Bind/unbind workflows to decide whether to `git init`
 
 ### **7.2 `check_ssh_auth(host, platform_name)`**
-- **Tests SSH** with `ssh -T git@host`
-- **Parses output** for success patterns (platform-specific)
+ **7.2 `check_ssh_auth(host, platform_name)`**
+- **Tests SSH** with `ssh -T -o ConnectTimeout=10 -o BatchMode=yes git@host`
+- **Enhanced timeout handling**: Uses 10-second connection timeout with batch mode (no password prompts)
+- **Platform-specific key support**: Checks `~/.ssh/config` for custom IdentityFile entries
+- **Success detection**: Accepts both exit code 0 and 1 as successful authentication
+  - GitHub returns exit code 1 with "no shell access" message (not an error)
+  - GitLab returns exit code 0 with "Welcome" message
+- **Failure handling**: Returns detailed debugging information including:
+  - Manual test command to run
+  - SSH config suggestions
+  - Key permission reminders
+  - Captured output snippet (up to 100 characters)
 - **Returns**: 0 if authenticated, 1 if failed
-- **Critical**: Called during `--test` and before cloning
+- **Critical**: Called during `--test` and before cloning operations
+- **Error resilience**: If SSH test fails, continues with warning (doesn't block operations)
 
 ### **7.3 `is_safe_directory(target_dir)`**
 - **Blacklists** `FORBIDDEN_DIRS`
@@ -208,6 +226,55 @@ AVAILABLE_PLATFORMS=()
 - **Detects** when single remote is bound to multiple locals
 - **Warns** about confusion risk and potential push/pull conflicts
 
+### **7.7 `validate_project_name(project_name, purpose)`**
+**Purpose**: Comprehensive security validation to prevent command injection and path traversal attacks.
+**Parameters**:
+- `project_name`: The project name to validate
+- `purpose`: Description of what the name is for (displayed in error messages)
+**Security Checks**:
+1. **Empty check**: Rejects empty names
+2. **Dangerous character detection**: Blocks characters that could enable command injection:
+   - `; & | ' " $ ` \ ( ) { } [ ] < >`
+3. **Path traversal prevention**: Blocks `../`, `..`, `/`, and `.\/` patterns
+4. **Whitelist validation**: Ensures name only contains `a-z, A-Z, 0-9, -, _`
+5. **Length validation**: Maximum 100 characters (prevents buffer overflow issues)
+**Return values**:
+- `0`: Validation passed
+- `1`: Validation failed (error message displayed to stderr)
+**Used by**: All functions that accept user input for project names to ensure safe shell operations.
+**Example**:
+```bash
+if ! validate_project_name "$user_input" "project name"; then
+    echo "Invalid project name"
+    return 1
+fi
+
+```
+### **7.8 detect_current_branch()**
+Purpose: Safely detect current Git branch with fallback handling.
+Implementation:
+current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || 
+                 git rev-parse --short HEAD 2>/dev/null || 
+                 echo "main")
+Used by: Branch synchronization workflows.
+
+### **7.9 remove_existing_remotes()**
+Purpose: Remove all Git remotes from current repository.
+Usage: Used in _create_local_only() to ensure unbound projects have no remotes.
+
+### **7.10 check_remote_exists(platform, owner, repo)**
+Purpose: Check if remote repository exists before attempting operations.
+Return values: 
+- 0: Repository exists
+- 1: Repository does not exist
+
+### **7.11 verify_project_state(project_dir)**
+Purpose: Verify project state and configuration consistency.
+Checks:
+- Remote state manifest existence
+- Branch consistency
+- Remote URL validation
+
 ---
 
 ### **8. API INTERACTION FUNCTIONS**
@@ -221,13 +288,20 @@ Core API abstraction with error resilience.
 - Retry logic: `max_retries=3` with exponential backoff starting at `retry_delay=2`
 - Rate limit handling (429): automatic retries with increasing delays
 - HTTP status handling:
-  * 401: "Authentication failed" with token variable name
+  * 401: "Authentication failed" with token variable name (uncomment for debugging)
   * 403: "Permission denied" with platform context
   * 404: "Resource not found" with platform context
   * 429: Automatic retry handling with delay progression (2s, 4s, 8s)
-  * Other failures: truncated error message (100 chars max)
+  * Other failures: truncated error message (100 chars max) to prevent terminal spam
 - DRY_RUN mode: outputs API call details without execution when `--dry-run` is active
-- Command structure: 
+**Debug lines**
+```bash
+#     local safe_token_preview="${token_value:0:4}...${token_value: -4}"
+#     echo -e "${YELLOW}[DEBUG] Token preview (safe): $safe_token_preview${NC}" >&2
+#     echo -e "${YELLOW}[DEBUG] Final auth header: $auth_header_name: ${auth_header_value:0:15}...${NC}" >&2
+```
+
+**Command structure**
 ```bash
 curl -sS -w "\n%{http_code}" -X "$method" \
 -H "Content-Type: application/json" \
@@ -236,6 +310,12 @@ curl -sS -w "\n%{http_code}" -X "$method" \
 "${api_base}${endpoint}"
 ```
 
+- **Custom header name support**: Resolves `PLATFORM_AUTH_HEADER_NAME` for platforms like GitLab that use `PRIVATE-TOKEN` instead of `Authorization`
+- **Query parameter authentication**: Falls back to `PLATFORM_AUTH_QUERY_PARAM` if configured
+- **Enhanced error handling**: 
+  - Better timeout management (30-second max-time)
+  - Batch mode for non-interactive operation
+  - More detailed error output (100-char truncation)
 
 **Return values:**
 - Success: raw JSON response body
@@ -311,29 +391,6 @@ dir="$REMOTE_ROOT/$PLATFORM_WORK_DIR[$platform]/$project_name"
 - Handles malformed URLs gracefully
 
 **Note:** Used in `_create_with_new_remote` after any failure point where repository creation succeeded but later steps failed.
-
-### **8.5 `sync_with_remote(platform, remote_url, current_branch)`**
-**Purpose**: Handles all branch synchronization scenarios between local and remote.
-
-**Phase Structure**:
-1. **Accessibility check**: `git ls-remote` with 5-second timeout
-2. **Fetch remote state**: `git fetch $platform`
-3. **Branch detection**: Determines remote's default branch via `git ls-remote --symref`
-4. **Branch alignment**: Prompts to rename local branch if mismatched
-5. **Divergence analysis**: Calculates commits ahead/behind using `git rev-list --count`
-
-**Scenario Handling**:
-- **Identical branches**: Offers push if no divergence
-- **Local ahead only**: Simple push workflow
-- **Remote ahead (divergence)**: Interactive menu with three options:
-  - `1) Rebase`: Clean history, preserves local commits on top
-  - `2) Merge`: Safer for collaboration, creates merge commit
-  - `3) Skip`: Force push, creating divergent branches
-  - `x) Cancel`: Abort synchronization
-
-**Stashing**: Automatically stashes uncommitted changes before rebase/merge, restores after.
-
-**Returns**: `0` on successful sync, `1` on cancellation or failure.
 
 ---
 
@@ -443,16 +500,6 @@ esac
 #### **9.4 `_clone_existing_remote(mode, urls)`**
 Universal cloning engine with path determination.
 **"standalone"**: Single URL, interactive prompt
-**"binding"**: Multiple URLs provided by caller
-
-**Destination logic:**
-```bash
-if [[ "$mode" == "binding" && ${#urls[@]} -gt 1 ]]; then
-  dest_dir="$REMOTE_ROOT/Multi-server/$repo_name"  # Multi-platform path
-else
-  dest_dir="$REMOTE_ROOT/${PLATFORM_WORK_DIR[$platform]}/$repo_name"  # Single platform path
-fi
-```
 
 **URL normalization flow:**
 ```bash
@@ -551,8 +598,29 @@ fi
 
 **Option 2 reuse**: Calls `convert_remote_to_local_workflow()` directly.
 
+###  **9.9 `delete_remote_repo(platform, owner, repo)`**
+**Purpose**: Delete a remote repository using platform-specific API endpoints.
+- **Dynamic endpoint resolution**: Uses `PLATFORM_REPO_CHECK_ENDPOINT` configuration instead of hardcoded GitHub-style URLs
+- **Template substitution**: Replaces `{owner}` and `{repo}` placeholders with actual values
+- **Platform agnostic**: Works with any platform configured in `platforms.conf`
+- **Silent operation**: Suppresses API response output, only reports status
+- **User feedback**: Displays "Remote cleanup attempted" message regardless of result
+**Example**:
+```
+delete_remote_repo "github" "owner" "repository-name"
+```
+**"binding"**: Multiple URLs provided by caller
 
-### **9.9 `_delete_local_copy()`**
+**Destination logic:**
+```bash
+if [[ "$mode" == "binding" && ${#urls[@]} -gt 1 ]]; then
+  dest_dir="$REMOTE_ROOT/Multi-server/$repo_name"  # Multi-platform path
+else
+  dest_dir="$REMOTE_ROOT/${PLATFORM_WORK_DIR[$platform]}/$repo_name"  # Single platform path
+fi
+```
+
+### **9.10 `_delete_local_copy()`**
 
 **Deletes directory only with safety confirmation**.
 
@@ -562,7 +630,7 @@ fi
 3. `rm -rf` with `execute_dangerous`
 
 
-### **9.10 `_delete_both()`**
+### **9.11 `_delete_both()`**
 
 **Most dangerous function—permanent deletion**.
 
@@ -580,6 +648,32 @@ read -rp "Type 'DELETE': " confirm_delete
 2. **Local deletion**: `rm -rf`
 
 Note: This function relies on _cleanup_failed_creation() for atomic operations during repository creation failures.
+
+### **9.12 `convert_single_to_multi_platform()`**
+**Purpose**: Convert existing single-platform projects to multi-platform configuration.
+**Workflow Steps**:
+1. **Project Discovery**: Scans `REMOTE_ROOT/{platform}/` directories for Git repositories
+2. **Interactive Selection**: Uses `_select_project_from_list()` for user choice
+3. **Platform Detection**: Identifies current platform from directory structure
+4. **URL Collection**: Prompts user for additional repository URLs
+5. **Directory Migration**: Moves project to `REMOTE_ROOT/Multi-server/`
+6. **Remote Reconfiguration**: 
+   - Renames "origin" remote to platform name (if applicable)
+   - Adds new remotes for additional URLs
+   - Platform detection for remote naming
+7. **Manifest Generation**: Calls `create_multi_platform_manifest()` with "convert_single_to_multi" action type
+**Directory Structure Transformation**:
+Before: REMOTE_ROOT/github.com/my-project/
+After:  REMOTE_ROOT/Multi-server/my-project/
+**Remote Configuration**:
+- Original remote renamed to platform name (e.g., "github")
+- Additional URLs added as separate remotes
+- Remote names derived from platform detection
+**Return Values**: None (void function with early returns on cancellation)
+**Used by**: Main menu option 4 (Convert Single → Multi Platform)
+User_Manual.md - Add New Workflow Description:
+Add to workflow descriptions section:
+
 ---
 
 ## **10. GITIGNORE WORKFLOW**
@@ -711,7 +805,7 @@ Direct gitignore management with multiple pattern sources.
 ### **11.4 `preview_and_abort_if_dry(description, ...)`**
 
 **DRY-RUN safety guard**
-
+ Global flag for dry-run mode. When `true`, shows planned actions without executing
 **Behavior**:
 - If `DRY_RUN=true`:  Shows accumulated planned actions list at completion, then exits
 - If `DRY_RUN=false`: Returns `1` (immediately returns)
@@ -834,10 +928,30 @@ preview_and_abort_if_dry  # Shows all accumulated actions and exits
 **Normal mode**: Executes silently, no prompts
 
 **Used for**: `mkdir`, `git add`, `git commit` (safe or already-confirmed operations).
+- Provides descriptive error messages on command failure
+- Used throughout script for critical operations
 
+### **11.12 Script Version and About**
+ **12. SCRIPT VERSION & ABOUT**
+ **12.1 `show_about()`**
+**Displays script information and copyright**.
+**Output includes**:
+- Script name and version
+- Copyright information
+- GPL v3+ license notice
+- Author contact information
+**Used by**: Menu option 8 (About this script)
+ **12.2 Version Display**
+**Version string**:
+repo-crafter v1.0.0-beta - Generic Platform Edition
+Displayed in: 
+- About section
+- Main menu header
+- Command line help output
 ---
 
-## **12. MAIN MENU & NAVIGATION**
+
+## **13. MAIN MENU & NAVIGATION**
 
 `main_menu()`
 
@@ -849,15 +963,6 @@ preview_and_abort_if_dry  # Shows all accumulated actions and exits
 - **Grouped options**: Create, Manage, Remote, System
 - **Input**: Single key press (1-8)
 - **Invalid handling**: Shows error, sleeps 1 second, loops
-
-**Layout**:
-
-```
-╔══════════════════════════════════════╗
-║     /   REPO-CRAFTER v0.2.0    \     ║
-║     | Generic Platform Edition |     ║
-╚══════════════════════════════════════╝
-```
 
 **Dispatch**: Simple `case` statement calls workflow functions.
 
@@ -885,6 +990,24 @@ preview_and_abort_if_dry  # Shows all accumulated actions and exits
 **Validation sequence** (must happen in order):
 
 1. **Tool check**: Verifies `git`, `curl`, `jq`, `ssh` in PATH
+
+``` bash
+required_tools=(git curl jq ssh envsubst tr)
+optional_tools=(yq-go)
+for cmd in "${required_tools[@]}"; do
+    if ! command -v "$cmd" &>/dev/null; then
+        echo -e "${RED}✗ FAILED${NC}"
+        echo -e "${RED}❌ Required tool '$cmd' is not installed.${NC}"
+        exit 1
+    fi
+done
+# Optional tools with warnings
+for cmd in "${optional_tools[@]}"; do
+    if ! command -v "$cmd" &>/dev/null; then
+        missing_optional+=("$cmd")
+    fi
+done
+```
 2. **Load config**: `load_platform_config()` - exits on failure
 3. **Offer config test**: Interactive prompt to run `--test` (skippable)
 4. **Safety check**: `is_safe_directory "$(pwd)"` - exits if in forbidden dir

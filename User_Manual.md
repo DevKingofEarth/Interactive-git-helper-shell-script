@@ -264,8 +264,8 @@ repo-crafter --test
 ```
 
 **Expected output:**
-```
-Loading platform configuration... ✅ Loaded 2 platform(s): github gitlab
+
+```Loading platform configuration... ✅ Loaded 2 platform(s): github gitlab
 
 === TESTING PLATFORM CONFIGURATION ===
 Available platforms: github gitlab
@@ -433,8 +433,8 @@ repo-crafter
 - The manifest file tracks state for future operations
 
 **Example output:**
-```
-✅ Successfully converted to multi-platform!
+
+```✅ Successfully converted to multi-platform!
 Remotes:
 github  git@github.com:username/project.git (fetch)
 github  git@github.com:username/project.git (push)
@@ -442,7 +442,22 @@ gitlab  git@gitlab.com:username/project.git (fetch)
 gitlab  git@gitlab.com:username/project.git (push)
 ```
 
-### **Workflow 5: Bind Local Project to Existing Remote**
+### **Workflow 5: Convert Single-Platform to Multi-Platform**
+**When to use**: You have a project on one platform (e.g., GitHub) and want to add additional platforms (e.g., also on GitLab).
+**Steps**:
+1. Select the existing single-platform project
+2. Review current remote configuration  
+3. Enter additional repository URLs (one per line)
+4. Confirm the conversion
+5. Automatic setup of multiple remotes
+**What happens**:
+- Project moves from platform-specific directory to `Multi-server/` folder
+- Existing remote renamed to platform name
+- Additional remotes added for new platforms
+- Multi-platform manifest created for tracking
+**Result**: Project with multiple remotes for different platforms, stored in `Multi-server/` directory structure.
+
+### **Workflow 6: Bind Local Project to Existing Remote**
 
 **: Connect to pre-existing repository**.
 
@@ -465,7 +480,7 @@ repo-crafter
 
 ---
 
-### **Workflow 6: Archive a Project (Disconnect)**
+### **Workflow 7: Archive a Project (Disconnect)**
 
 **Perfect for**: archiving old work, before removing project from remote.
 
@@ -483,23 +498,21 @@ repo-crafter
 
 ---
 
-### **Workflow 7: Handle Remote Divergence**
+### **Workflow 8: Handle Remote Divergence**
 
 Perfect for: When you worked offline and the remote repository has new commits.
 
-```
-repo-crafter
-```
+```repo-crafter
+
 
 **Menu Navigation:**
 1. Select `2) 🔗 Convert Local → Remote`
 2. Choose your local project with divergence
 3. Select binding method: `2) Connect to EXISTING remote repository`
 4. Enter the remote URL
-
-**Script detects divergence and presents options:**
 ```
-⚠️  DIVERGENCE DETECTED: Remote has 3 new commit(s)
+**Script detects divergence and presents options:**
+```⚠️  DIVERGENCE DETECTED: Remote has 3 new commit(s)
 
 Integration options:
   1) Rebase (clean history)
@@ -520,12 +533,11 @@ Integration options:
 
 **Branch mismatch handling:**
 If your local branch name doesn't match the remote's default branch, you'll be prompted:
-```
-⚠️  Branch mismatch: local 'feature/new-ui' vs remote 'main'
+```⚠️  Branch mismatch: local 'feature/new-ui' vs remote 'main'
 Rename local branch to match remote? (Y/n)
 ```
 
-### **Workflow 7: List All Your Repositories**
+### **Workflow 9: List All Your Repositories**
 
 **Perfect for**: Finding a project across platforms
 
@@ -540,7 +552,7 @@ repo-crafter
 
 ---
 
-### **Workflow 8: Manage Gitignore**
+### **Workflow 10: Manage Gitignore**
 
 **Perfect for**: Adding ignore patterns to existing project
 
@@ -564,7 +576,7 @@ repo-crafter
 
 ---
 
-### **Workflow 9: Delete Projects Safely**
+### **Workflow 11: Delete Projects Safely**
 
 **Perfect for**: Cleaning up disk space
 
@@ -677,8 +689,7 @@ repo-crafter --help
 6. **Manual sync**: Use `git push github` or `git push gitlab` individually
 
 ### **Project Structure**
-```
-~/Projects/Remote_Projects/
+```~/Projects/Remote_Projects/
 └── Multi-server/
     └── my-important-project/
         ├── .git/
@@ -688,7 +699,7 @@ repo-crafter --help
 
 ### **REMOTE_STATE.yml Manifest**
 
-```
+```yml
 # REPO-CRAFTER REMOTE STATE MANIFEST
 # Generated: 2026-01-12T15:30:45+00:00
 # Project: my-project
