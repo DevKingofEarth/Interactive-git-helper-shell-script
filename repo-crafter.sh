@@ -42,7 +42,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Config file is in the SAME directory as this script
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/repo-crafterFiles"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/repo-crafter"
 CONFIG_FILE="$CONFIG_DIR/platforms.conf"
 
 # Global associative arrays
