@@ -176,6 +176,8 @@ ssh_host = github.com
 repo_domain = github.com
 token_var = GITHUB_API_TOKEN
 auth_header = Bearer {token}
+accept_header = application/vnd.github+json  # Required for GitHub API
+repo_delete_endpoint = /repos/{owner}/{repo}
 authenticated_user_endpoint = /user
 authenticated_user_key = .login  # jq path to extract username
 repo_check_endpoint = /repos/{owner}/{repo}
@@ -197,6 +199,8 @@ ssh_host = gitlab.com
 repo_domain = gitlab.com
 token_var = GITLAB_API_TOKEN
 auth_header = Bearer {token}
+accept_header = application/json
+repo_delete_endpoint = /projects/{owner}%2F{repo}
 authenticated_user_endpoint = /user
 authenticated_user_key = .username
 repo_check_endpoint = /projects/{owner}%2F{repo}
@@ -513,10 +517,11 @@ Perfect for: When you worked offline and the remote repository has new commits.
 ```
 **Script detects divergence and presents options:**
 ```⚠️  DIVERGENCE DETECTED: Remote has 3 new commit(s)
+   You have 2 local commit(s) not pushed
 
 Integration options:
   1) Rebase (clean history)
-  2) Merge (safer for collaboration) 
+  2) Merge (safer for collaboration)
   3) Skip - Push anyway (divergent branches)
   x) Cancel
 ```
@@ -926,6 +931,38 @@ If platform API returns SSH URL under non-standard field names:
 # Try ssh_url first, then fallback to custom field
 ssh_url_fields = ssh_url,ssh_clone_url,git_ssh_url
 ```
+
+### **Custom API Accept Headers**
+
+Some APIs require specific `Accept` headers for proper response formatting:
+
+```ini
+# GitHub requires special media type
+accept_header = application/vnd.github+json
+
+# GitLab uses standard JSON
+accept_header = application/json
+```
+
+**When to customize**: Enterprise instances of GitHub/GitLab may require different headers. Most users can use the defaults shown above.
+
+### **Custom Repository Delete Endpoints**
+
+Different platforms use different API paths for repository deletion:
+
+```ini
+# GitHub standard format
+repo_delete_endpoint = /repos/{owner}/{repo}
+
+# GitLab requires URL-encoded owner/repo
+repo_delete_endpoint = /projects/{owner}%2F{repo}
+```
+
+**Placeholders**:
+- `{owner}`: Repository owner (URL-encoded if needed)
+- `{repo}`: Repository name
+
+**Note**: Most platforms work with standard patterns. Enterprise instances may need custom paths.
 
 ---
 

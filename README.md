@@ -1,8 +1,8 @@
 # Repo-Crafter
 
 > [!CAUTION]
-> Although this code has been reviewed, it has been tailored with AI LLM assistance and some features still require testing, so it is still under development. The code has to be refactored further.
-> **Please review the code thoroughly before use.** You can refer to the other documentation files if necessary.
+> This script manages Git repositories and makes API calls to platforms. Please review the code thoroughly before use.
+> **Configure tokens in** `~/.config/repo-crafter/platforms.conf` **or environment variables.**
 
 The README.md would be gradually edited and updated.
 
@@ -17,7 +17,7 @@ This is an interactive script to manage your projects may it be local, cloned or
 
 - Code Documentation : for debugging or easy understanding of script
 - User Manual : to understand and ease of use for Interactions with the script.
-- Also refer platform.conf for your setup.
+- Also refer `~/.config/repo-crafter/platforms.conf` for your setup.
 - View below diagrams for easy visualization, but there might be mistakes, which will also be resolved gradually.
 
 2. Prequisites of knowledge

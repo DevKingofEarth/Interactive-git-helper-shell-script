@@ -1,0 +1,33 @@
+# ==================== GITIGNORE TEMPLATE ====================
+# This file is for reference only. Copy patterns to .gitignore as needed.
+#
+# How to use:
+# 1. Review patterns in this template
+# 2. Copy needed patterns to your .gitignore file
+# 3. Commit the .gitignore file to share with team members
+#
+# Common categories to consider:
+#
+# Operating System Files:
+# .DS_Store (macOS)
+# Thumbs.db (Windows)
+# .Trash/ (Linux)
+#
+# IDE/Editor Files:
+# .vscode/
+# .idea/
+# *.swp (Vim)
+# *.suo (Visual Studio)
+#
+# Build Artifacts:
+# dist/
+# build/
+# *.min.js
+# *.map
+#
+# Environment Files:
+# .env
+# config.local
+#
+# Note: For sensitive files like API keys or credentials,
+# consider using .git/info/exclude (local-only) instead.

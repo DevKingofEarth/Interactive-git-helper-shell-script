@@ -2,6 +2,35 @@
 
 All notable changes to Repo-Crafter will be documented in this file.
 
+## [1.1.2-beta] - 2026-02-05
+
+### Fixed
+- Fixed JSON payload corruption caused by bash brace interpretation in template defaults
+- Fixed missing `Accept` header for GitHub API (required: `application/vnd.github+json`)
+- Fixed hardcoded DELETE endpoint - now uses platform-specific `repo_delete_endpoint`
+- Fixed unbound variable error in `urls` array handling
+- Fixed manifest (`REMOTE_STATE.yml`) being created for single-platform projects
+- Fixed menu prompts being captured by command substitution (now output to stderr with /dev/tty fallback)
+- Fixed missing return statement causing execution continuation after errors
+- Fixed syntax error in create_new_project_workflow() cancel handler
+- Fixed sleep timing from 10s to 5s for better UX
+
+### Added
+- Unified `detect_platform_from_url()` helper function (replaces 3 duplicate implementations)
+- Unified `extract_host_from_url()` helper function
+- Conflict detection showing "Remote has X new commits" / "You have X local commits not pushed"
+- Platform selection removed from test_platform_config() to avoid interactive prompts
+- Added /dev/tty fallback for stdin in interactive functions
+
+### Changed
+- Improved error handling with better I/O separation
+- Platform configuration now fully declarative (no hardcoded endpoints in code)
+- Enhanced stdin handling in select_platforms() and _select_project_from_dir()
+
+### Notes
+- This version includes critical bug fixes for API interactions and I/O handling
+- All platforms now require `accept_header` and `repo_delete_endpoint` in config
+
 ## [1.1.1-beta] - 2026-01-16
 
 ### Security

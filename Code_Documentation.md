@@ -61,6 +61,8 @@ declare -A PLATFORM_TOKEN_VAR
 declare -A PLATFORM_AUTH_HEADER
 declare -A PLATFORM_AUTH_HEADER_NAME
 declare -A PLATFORM_AUTH_QUERY_PARAM
+declare -A PLATFORM_ACCEPT_HEADER
+declare -A PLATFORM_REPO_DELETE_ENDPOINT
 declare -A PLATFORM_REPO_CHECK_ENDPOINT
 declare -A PLATFORM_REPO_CHECK_METHOD
 declare -A PLATFORM_REPO_CHECK_SUCCESS_KEY
@@ -95,11 +97,15 @@ AVAILABLE_PLATFORMS=()
 - `PLATFORM_AUTH_HEADER`: Authorization header format. Customizable authorization header format (e.g., `Bearer {token}`, `{token}`)
 - `PLATFORM_AUTH_HEADER_NAME` - Custom authorization header names (like PRIVATE-TOKEN for GitLab)
 - `PLATFORM_AUTH_QUERY_PARAM` - Support for query parameter authentication
+- `PLATFORM_ACCEPT_HEADER`: HTTP `Accept` header for API requests (e.g., `application/vnd.github+json` for GitHub)
+- `PLATFORM_REPO_DELETE_ENDPOINT`: API endpoint pattern for repository deletion with `{owner}` and `{repo}` placeholders
 - `PLATFORM_OWNER_NOT_FOUND_PATTERNS`: Comma-separated error message fragments to detect when repo owner doesn't exist
 - `PLATFORM_SSH_URL_FIELDS`: Comma-separated JSON field names to try when extracting SSH URL from API response
 - `PLATFORM_VISIBILITY_MAP`: JSON mapping between script's visibility terms and platform-specific terms
 
 **Adding a Platform**: Add a new `[section]` to `platforms.conf`—the script auto-detects it without code changes.
+
+**Required Keys**: GitHub and GitLab now require `accept_header` and `repo_delete_endpoint` in config for proper API operation.
 
 ---
 
@@ -121,7 +127,7 @@ AVAILABLE_PLATFORMS=()
 - Config parsing uses regex patterns to match `key = value` syntax
 - Filters platforms where `enabled=true` AND `api_base` is set AND `token_var` is set
 
-**Extended Support**: Config parsing now automatically handles `auth_header_name` and `auth_query_param` keys when present in platform configuration.
+**Extended Support**: Config parsing now automatically handles `auth_header_name`, `auth_query_param`, `accept_header`, and `repo_delete_endpoint` keys when present in platform configuration.
 
 **Error Handling**:
 - Config not found → exits with example config snippet
@@ -141,8 +147,8 @@ AVAILABLE_PLATFORMS=()
 - `allow_multiple`: Boolean. If true, shows `a` (All) and `m` (Multiple) options
 
 **Flow**:
-1. Prints menu directly to `/dev/tty` (bypasses stdout capture)
-2. Reads input from `/dev/tty` (ensures interactivity even when piped)
+1. Prints menu directly to stderr with `>&2` (bypasses stdout capture)
+2. Reads input from stdin, with fallback to `/dev/tty` when stdin is not a terminal (handles command substitution)
 3. Parses input:
    - `a` → All platforms
    - `m` → Prompts for comma-separated numbers
@@ -304,12 +310,14 @@ Core API abstraction with error resilience.
 **Command structure**
 ```bash
 curl -sS -w "\n%{http_code}" -X "$method" \
+-H "Accept: $accept_header" \
 -H "Content-Type: application/json" \
 -H "Authorization: $auth_header" \
 --max-time 30 \
 "${api_base}${endpoint}"
 ```
 
+- **Accept header**: Resolved from `PLATFORM_ACCEPT_HEADER[$platform]` (defaults to `application/json`). GitHub requires `application/vnd.github+json` for proper response format.
 - **Custom header name support**: Resolves `PLATFORM_AUTH_HEADER_NAME` for platforms like GitLab that use `PRIVATE-TOKEN` instead of `Authorization`
 - **Query parameter authentication**: Falls back to `PLATFORM_AUTH_QUERY_PARAM` if configured
 - **Enhanced error handling**: 
@@ -331,7 +339,7 @@ Repository creation with fallback mechanisms.
   2. Standard fields: `.ssh_url // .ssh_url_to_repo // .clone_url`
   3. Template generation: `PLATFORM_SSH_URL_TEMPLATE` with host/owner/repo substitution
 - Error pattern detection: `PLATFORM_OWNER_NOT_FOUND_PATTERNS` comma-separated matching
-- Cleanup on partial failure: `_cleanup_failed_creation()` calls DELETE API endpoint
+- Cleanup on partial failure: `_cleanup_failed_creation()` calls DELETE using `PLATFORM_REPO_DELETE_ENDPOINT` template
 - Default branch detection: `git config --get init.defaultBranch` fallback to "main"
 
 **Edge case handling:**
@@ -377,7 +385,7 @@ New atomic operation safeguard.
 ```bash
 # Remote cleanup
 owner=$(echo "$remote_url" | awk -F'[@:/]' '{print $(NF-1)}')
-platform_api_call "$platform" "${PLATFORM_REPO_CHECK_ENDPOINT[$platform]//\{owner\}/$owner//\{repo\}/$project_name}" "DELETE" >/dev/null 2>&1
+platform_api_call "$platform" "${PLATFORM_REPO_DELETE_ENDPOINT[$platform]//\{owner\}/$owner//\{repo\}/$project_name}" "DELETE" >/dev/null 2>&1
 
 # Local cleanup
 dir="$REMOTE_ROOT/$PLATFORM_WORK_DIR[$platform]/$project_name"
@@ -421,15 +429,22 @@ bind_choice determines execution path:
 
 **Option 2 (EXISTING repository):**
 - URL parsing: `parse_git_url "$first_url"`
-- Platform detection: 
+- Platform detection:
   ```bash
   for p in "${AVAILABLE_PLATFORMS[@]}"; do
-    if [[ "$host" == "${PLATFORM_REPO_DOMAIN[$p]}" ]] || 
+    if [[ "$host" == "${PLATFORM_REPO_DOMAIN[$p]}" ]] ||
        [[ "$host" == "${PLATFORM_SSH_HOST[$p]}" ]]; then
   ```
 - Directory cloning: `git clone "$first_url" "$dest_dir"`
 - File merging: `cp -r "$source_dir/." .`
 - Divergence handling: `sync_with_remote` called after cloning
+
+**Conflict Detection**: When binding to an existing remote, the workflow:
+1. Fetches remote state
+2. Compares commit counts (ahead/behind)
+3. Warns if remote has new commits ("Remote has X new commit(s)")
+4. Warns if local has unpushed commits ("You have X local commit(s) not pushed")
+5. Offers rebase/merge/skip options
 
 **Edge case handling:**
 - Detached HEAD state detection in `current_branch` logic
@@ -563,6 +578,8 @@ fi
 - API configuration snapshot for future operations
 - Last sync status and timestamp for state tracking
 
+**Note**: Manifest is only created for multi-platform projects (2+ platforms). Single-platform projects do not need a manifest as the git remote tracks the connection.
+
 
 ### **9.6 `convert_remote_to_local_workflow()`**
 
@@ -600,7 +617,7 @@ fi
 
 ###  **9.9 `delete_remote_repo(platform, owner, repo)`**
 **Purpose**: Delete a remote repository using platform-specific API endpoints.
-- **Dynamic endpoint resolution**: Uses `PLATFORM_REPO_CHECK_ENDPOINT` configuration instead of hardcoded GitHub-style URLs
+- **Dynamic endpoint resolution**: Uses `PLATFORM_REPO_DELETE_ENDPOINT` configuration with `{owner}` and `{repo}` placeholders
 - **Template substitution**: Replaces `{owner}` and `{repo}` placeholders with actual values
 - **Platform agnostic**: Works with any platform configured in `platforms.conf`
 - **Silent operation**: Suppresses API response output, only reports status
@@ -800,6 +817,45 @@ Direct gitignore management with multiple pattern sources.
 6. Return `owner/repo` path
 
 **Used by**: Binding workflows to validate and parse user-provided URLs.
+
+
+### **11.x `detect_platform_from_url(url)`**
+
+**NEW: Automatic platform detection from git URL.**
+
+**Implementation:**
+```bash
+detect_platform_from_url() {
+  local url="$1"
+  local host=$(extract_host_from_url "$url")
+
+  for platform in "${AVAILABLE_PLATFORMS[@]}"; do
+    if [[ "$host" == "${PLATFORM_REPO_DOMAIN[$platform]}" ]] ||
+       [[ "$host" == "${PLATFORM_SSH_HOST[$platform]}" ]]; then
+      echo "$platform"
+      return 0
+    fi
+  done
+  return 1
+}
+```
+
+**Used by**: URL parsing in binding workflows to automatically identify platform without user input.
+
+---
+
+### **11.x `extract_host_from_url(url)`**
+
+**NEW: Extract hostname from any git URL format.**
+
+**Handles**:
+- SSH: `git@github.com:owner/repo.git` → `github.com`
+- HTTPS: `https://github.com/owner/repo` → `github.com`
+- SSH with protocol: `ssh://git@gitlab.com/repo` → `gitlab.com`
+
+**Returns**: Hostname string or exit code 1 on parse failure.
+
+**Used by**: `detect_platform_from_url()` and other URL parsing functions.
 
 
 ### **11.4 `preview_and_abort_if_dry(description, ...)`**

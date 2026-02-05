@@ -39,10 +39,11 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\e[0;36m'
 NC='\033[0m' # No Color
 
 # Config file is in the SAME directory as this script
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/repo-crafter"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/repo-crafterFiles"
 CONFIG_FILE="$CONFIG_DIR/platforms.conf"
 
 # Global associative arrays
@@ -68,6 +69,10 @@ declare -A PLATFORM_AUTH_QUERY_PARAM
 declare -A PLATFORM_OWNER_NOT_FOUND_PATTERNS
 declare -A PLATFORM_SSH_URL_FIELDS
 declare -A PLATFORM_VISIBILITY_MAP
+declare -A PLATFORM_AUTHENTICATED_USER_ENDPOINT
+declare -A PLATFORM_AUTHENTICATED_USER_KEY
+declare -A PLATFORM_ACCEPT_HEADER
+declare -A PLATFORM_REPO_DELETE_ENDPOINT
 # declare -A PLATFORM_AUTH_HEADER_OVERRIDES
 AVAILABLE_PLATFORMS=()
 DRY_RUN_ACTIONS=()
@@ -122,6 +127,8 @@ EOF
         PLATFORM_AUTH_QUERY_PARAM \
         PLATFORM_SSH_URL_FIELDS \
         PLATFORM_VISIBILITY_MAP \
+        PLATFORM_AUTHENTICATED_USER_ENDPOINT \
+        PLATFORM_AUTHENTICATED_USER_KEY \
         PLATFORM_WORK_DIR ; do
         declare -gA "$array_name"
     done
@@ -144,10 +151,10 @@ EOF
                 enabled)
                     [[ "$value" == "true" ]] && PLATFORM_ENABLED["$current_section"]=true
                     ;;
-                api_base|ssh_host|repo_domain|token_var|work_dir|auth_header|auth_query_param|owner_not_found_patterns|ssh_url_fields|visibility_map|auth_header_name)
+                api_base|ssh_host|repo_domain|token_var|work_dir|auth_header|auth_query_param|owner_not_found_patterns|ssh_url_fields|visibility_map|auth_header_name|authenticated_user_endpoint|authenticated_user_key|accept_header)
                     declare -g "PLATFORM_${key^^}"["$current_section"]="$value"
                     ;;
-                repo_check_endpoint|repo_check_method|repo_check_success_key|repo_create_endpoint|repo_create_method|repo_list_endpoint|repo_list_success_key|payload_template|ssh_url_template|display_format)
+                repo_check_endpoint|repo_check_method|repo_check_success_key|repo_create_endpoint|repo_create_method|repo_list_endpoint|repo_list_success_key|repo_delete_endpoint|repo_delete_method|payload_template|ssh_url_template|display_format)
                     local array_key="${key^^}"
                     declare -g "PLATFORM_${array_key}"["$current_section"]="$value"
                     ;;
@@ -172,31 +179,34 @@ EOF
 }
 
 # Reliable platform selection function
+# Menu goes to stderr (so user sees it), result to stdout (for capture)
 select_platforms() {
     local prompt="$1"
     local allow_multiple="$2"
     local choices=()
 
-    # Display everything directly to the terminal first
+    # Display menu to stderr (user will see it)
     {
         echo ""
         echo -e "${BLUE}$prompt${NC}"
-
-        # Show platform list
         for i in "${!AVAILABLE_PLATFORMS[@]}"; do
             echo "  $((i+1))) ${AVAILABLE_PLATFORMS[i]}"
         done
-
         if [[ "$allow_multiple" == "true" ]]; then
             echo "  a) All platforms"
             echo "  m) Multiple selection (e.g., 1,3,5)"
         fi
         echo "  x) Cancel"
         echo ""
-    } > /dev/tty
+    } >&2
 
-    # Read input from the terminal
-    read -rp "Enter your choice: " input < /dev/tty
+    # Read from stdin, fallback to /dev/tty if stdin is not a terminal
+    # This handles cases where function is called within command substitution
+    if [[ -t 0 ]]; then
+        read -rp "Enter your choice: " input
+    else
+        read -rp "Enter your choice: " input </dev/tty
+    fi
 
     [[ "$input" == "x" ]] && return 1
 
@@ -204,20 +214,19 @@ select_platforms() {
         if [[ "$input" == "a" ]]; then
             choices=("${AVAILABLE_PLATFORMS[@]}")
         elif [[ "$input" == "m" ]]; then
-            {
-                echo "Enter platform numbers separated by commas (e.g., 1,3,5):"
-            } > /dev/tty
-            read -rp "Selection: " multi_input < /dev/tty
+            echo "Enter platform numbers separated by commas (e.g., 1,3,5):" >&2
+            if [[ -t 0 ]]; then
+                read -rp "Selection: " multi_input
+            else
+                read -rp "Selection: " multi_input </dev/tty
+            fi
             IFS=',' read -ra selected_indices <<< "$multi_input"
             for idx in "${selected_indices[@]}"; do
-                # FIX: Use $idx instead of $input (bug fix)
                 local valid_idx=$((idx-1))
-                # Validate index bounds
                 if [[ ! "$idx" =~ ^[0-9]+$ ]]; then
                     echo -e "${RED}Invalid selection. Enter a number.${NC}" >&2
                     continue
                 fi
-
                 if [[ $valid_idx -lt 0 || $valid_idx -ge ${#AVAILABLE_PLATFORMS[@]} ]]; then
                     echo -e "${RED}Invalid selection. Choose 1-${#AVAILABLE_PLATFORMS[@]}.${NC}" >&2
                     continue
@@ -233,9 +242,8 @@ select_platforms() {
             IFS=',' read -ra selected_indices <<< "$input"
             for idx in "${selected_indices[@]}"; do
                 idx=$((idx-1))
-                # FIX: Added bounds checking
                 if [[ ! "$idx" =~ ^[0-9]+$ ]] || [[ $idx -lt 0 ]] || [[ $idx -ge ${#AVAILABLE_PLATFORMS[@]} ]]; then
-                    continue  # Skip invalid indices
+                    continue
                 fi
                 choices+=("${AVAILABLE_PLATFORMS[$idx]}")
             done
@@ -280,23 +288,13 @@ test_platform_config() {
         check_ssh_auth "${PLATFORM_SSH_HOST[$platform]}" "$platform" || echo -e "${YELLOW}⚠️  SSH test failed but continuing...${NC}"
     done
 
-    echo -e "\nTesting platform selection..."
-    local selected
-    selected=$(select_platforms "Choose platform(s):" "true")
-
-    if [[ -n "$selected" ]]; then
-        echo -e "\n${GREEN}Selected:${NC}"
-        while IFS= read -r platform; do
-            echo "  - $platform"
-        done <<< "$selected"
-    else
-        echo -e "\n${YELLOW}No selection made${NC}"
     fi
 
     echo ""
     read -rp "Press Enter to continue..." -n 1
     echo ""
     warn_duplicate_remote_connections
+    sleep 5
 }
 
 # ======================= CORE VALIDATION FUNCTIONS ===========================
@@ -351,9 +349,6 @@ check_ssh_auth() {
         return 1
     fi
 }
-
-# SECURE TEMPLATE PROCESSING
-
 
 # Validate and sanitize project names to prevent injection attacks
 validate_project_name() {
@@ -585,7 +580,9 @@ platform_api_call() {
     fi
 
     ### curl_args initialization
-    local curl_args=(-sS --fail --fail-with-body -w "\n%{http_code}" -X "$method" -H "Content-Type: application/json" --max-time 30)
+    # Get Accept header from platform config, default to application/json
+    local accept_header="${PLATFORM_ACCEPT_HEADER[$platform]:-application/json}"
+    local curl_args=(-sS --fail --fail-with-body -w "\n%{http_code}" -X "$method" -H "Accept: $accept_header" -H "Content-Type: application/json" --max-time 30)
 
     ### authentication
 
@@ -617,9 +614,24 @@ platform_api_call() {
 
     [[ -n "$data" ]] && curl_args+=(-d "$data")
 
-    # DEBUG: Show EXACT curl command that will be executed
-    echo -e "${YELLOW}[DEBUG] Final curl command:${NC}" >&2
-    echo "curl ${curl_args[*]} \"${api_base}${endpoint}\"" >&2
+    # DEBUG: Show curl command (token half-masked for security)
+    if [[ "$DEBUG_MODE" == "true" ]]; then
+        echo -e "${YELLOW}[DEBUG] API Call: ${NC}" >&2
+        local masked_args=("${curl_args[@]}")
+        for i in "${!masked_args[@]}"; do
+            if [[ "${masked_args[i]}" =~ ^Authorization:.*Bearer\ (.+)$ ]]; then
+                local full_token="${BASH_REMATCH[1]}"
+                local token_len=${#full_token}
+                if [[ $token_len -gt 10 ]]; then
+                    local masked_token="${full_token:0:4}...${full_token: -4}"
+                else
+                    masked_token="***"
+                fi
+                masked_args[i]="Authorization: Bearer $masked_token"
+            fi
+        done
+        echo "curl ${masked_args[*]} \"${api_base}${endpoint}\"" >&2
+    fi
 
     # Execute with retries
     local attempt=1
@@ -639,14 +651,15 @@ platform_api_call() {
         case "$http_code" in
             401)
                 echo -e "${RED}❌ Authentication failed for $platform${NC}" >&2
-                echo -e "${YELLOW}[DEBUG] Full response body:${NC}" >&2
-                echo "$body" | head -10 >&2
                 return 1
                 ;;
             403|404)
                 echo -e "${RED}❌ Error $http_code from $platform${NC}" >&2
-                echo -e "${YELLOW}[DEBUG] Response details:${NC}" >&2
-                echo "$body" | head -10 >&2
+                echo -e "${YELLOW}Possible causes:${NC}" >&2
+                echo -e "  • Token lacks required permissions (need 'repo' scope for GitHub)" >&2
+                echo -e "  • Repository may already exist with that name" >&2
+                echo -e "  • API rate limit exceeded" >&2
+                echo -e "${YELLOW}Hint: Run './repo-crafter.sh --debug' to see API details${NC}" >&2
                 return 1
                 ;;
             *)
@@ -656,8 +669,6 @@ platform_api_call() {
                     ((retry_delay *= 2))
                 else
                     echo -e "${RED}❌ API call failed after $max_retries attempts${NC}" >&2
-                    echo -e "${YELLOW}[DEBUG] Final response:${NC}" >&2
-                    echo "$body" | head -20 >&2
                     return 1
                 fi
                 ;;
@@ -666,8 +677,6 @@ platform_api_call() {
     done
     return 1
 }
-
-
 
 # List existing remote repositories for a platform
 list_remote_repos() {
@@ -686,7 +695,7 @@ list_remote_repos() {
     fi
     echo -e "${GREEN}✅ Found${NC}"
 
-    # PLATFORM-SPECIFIC JQ FILTERS (THEY ACTUALLY WORK)
+    # PLATFORM-SPECIFIC JQ FILTERS
     if [[ "$platform" == "github" ]]; then
         echo "$response" | jq -r '.[] | "\(.name) (\(.visibility)) - git@github.com:\(.owner.login)/\(.name).git"'
     elif [[ "$platform" == "gitlab" ]]; then
@@ -700,6 +709,36 @@ list_remote_repos() {
     return 0
 }
 
+# Function to get authenticated username from platform API
+get_authenticated_user() {
+    local platform="$1"
+    local endpoint="${PLATFORM_AUTHENTICATED_USER_ENDPOINT[$platform]:-}"
+    local key="${PLATFORM_AUTHENTICATED_USER_KEY[$platform]:-}"
+
+    if [[ -z "$endpoint" ]] || [[ -z "$key" ]]; then
+        echo -e "${YELLOW}⚠️  Platform $platform doesn't support authenticated user lookup${NC}" >&2
+        return 1
+    fi
+
+    local response
+    response=$(platform_api_call "$platform" "$endpoint" "GET")
+
+    if [[ $? -ne 0 ]] || [[ -z "$response" ]]; then
+        echo -e "${RED}❌ Failed to get authenticated user for $platform${NC}" >&2
+        return 1
+    fi
+
+    local username
+    username=$(echo "$response" | jq -r "$key // empty" 2>/dev/null || echo "")
+
+    if [[ -z "$username" ]]; then
+        echo -e "${RED}❌ Could not extract username from API response${NC}" >&2
+        return 1
+    fi
+
+    echo "$username"
+}
+
 # Creating a new repository in remote platform of choice
 create_remote_repo() {
     local platform="$1" repo_name="$2" visibility="$3" user_name="$4"
@@ -708,32 +747,48 @@ create_remote_repo() {
         return 1
     fi
 
-    # 1. Apply visibility mapping from config
-    local platform_visibility="$visibility"
-    if [[ -n "${PLATFORM_VISIBILITY_MAP[$platform]}" ]]; then
-        local map_json="${PLATFORM_VISIBILITY_MAP[$platform]}"
-        local mapped_vis=$(echo "$map_json" | jq -r --arg vis "$visibility" '.[$vis] // empty' 2>/dev/null)
-        [[ -n "$mapped_vis" ]] && platform_visibility="$mapped_vis"
+    # Get authenticated username from API (overrides the passed user_name)
+    local api_user_name
+    if api_user_name=$(get_authenticated_user "$platform"); then
+        user_name="$api_user_name"
+        echo -e "${BLUE}Using authenticated user: $user_name${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Falling back to provided username: $user_name${NC}"
     fi
 
-    # 2. Get template
-    local template="${PLATFORM_PAYLOAD_TEMPLATE[$platform]:-{\"name\":\"{repo}\"}}"
+    # DEBUG: Show loaded template from array
+    echo "[DEBUG] Template from array: '${PLATFORM_PAYLOAD_TEMPLATE[$platform]}'" >&2
+
+    # 2. Get template - use direct assignment to avoid bash brace interpretation
+    local template
+    if [[ -n "${PLATFORM_PAYLOAD_TEMPLATE[$platform]:-}" ]]; then
+        template="${PLATFORM_PAYLOAD_TEMPLATE[$platform]}"
+    else
+        template='{"name":"{repo}"}'
+    fi
+
+    # DEBUG: Show raw template
+    echo "[DEBUG] Raw template: $template" >&2
 
     # 3. Simple placeholder replacement (your complex logic breaks things)
-    template="${template//\{repo\}/$(echo "$repo_name" | jq -sRr @uri)}"
-    template="${template//\{owner\}/$(echo "$user_name" | jq -sRr @uri)}"
+    template="${template//\{repo\}/$(printf '%s' "$repo_name" | jq -sRr @uri)}"
+    template="${template//\{owner\}/$(printf '%s' "$user_name" | jq -sRr @uri)}"
 
-    # Handle {private} and {visibility} placeholders
+    # DEBUG: Show template after replacement
+    echo "[DEBUG] After replacement: $template" >&2
+
+    # Handle {private} placeholder only
     if [[ "$visibility" == "private" ]]; then
         template="${template//\{private\}/true}"
     else
         template="${template//\{private\}/false}"
     fi
-    template="${template//\{visibility\}/$platform_visibility}"
+
+    # DEBUG: Show final template
+    echo "[DEBUG] Final template: $template" >&2
 
     # Clean up any unused placeholders
     template="${template//\{private\}/}"
-    template="${template//\{visibility\}/}"
 
     echo -n "Creating repository on $platform... "
 
@@ -782,14 +837,14 @@ create_remote_repo() {
         for field in "${field_array[@]}"; do
             # Trim whitespace from field name
             field=$(echo "$field" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            ssh_url=$(echo "$response" | jq -r ".$field // empty" 2>/dev/null)
+            ssh_url=$(echo "$response" | jq -r ".$field // empty" 2>/dev/null || echo "")
             [[ -n "$ssh_url" ]] && break
         done
     fi
 
     # Fallback to common fields
     if [[ -z "$ssh_url" ]]; then
-        ssh_url=$(echo "$response" | jq -r '.ssh_url // .ssh_url_to_repo // .clone_url // empty')
+        ssh_url=$(echo "$response" | jq -r '.ssh_url // .ssh_url_to_repo // .clone_url // empty' 2>/dev/null || echo "")
     fi
 
     # Final fallback to template
@@ -876,10 +931,22 @@ sync_with_remote() {
     fi
 
     # Analyze divergence
-    git fetch "$platform" "$remote_branch" --quiet 2>/dev/null
+    git fetch "$platform" "$remote_branch"
+    if [[ $? -ne 0 ]]; then
+        echo -e "${RED}❌ Failed to fetch from remote '$platform' branch '$remote_branch'.${NC}" >&2
+        return 1
+    fi
     local ahead=0 behind=0
-    ahead=$(git rev-list --count "$platform/$remote_branch..$current_branch" 2>/dev/null || echo 0)
-    behind=$(git rev-list --count "$current_branch..$platform/$remote_branch" 2>/dev/null || echo 0)
+    ahead=$(git rev-list --count "$platform/$remote_branch..$current_branch")
+    if [[ $? -ne 0 ]]; then
+        echo -e "${RED}❌ Failed to count ahead commits.${NC}" >&2
+        return 1
+    fi
+    behind=$(git rev-list --count "$current_branch..$platform/$remote_branch")
+    if [[ $? -ne 0 ]]; then
+        echo -e "${RED}❌ Failed to count behind commits.${NC}" >&2
+        return 1
+    fi
 
     echo -e "\n${BLUE}Divergence analysis:${NC}"
     echo "  Local is $ahead commit(s) ahead of remote"
@@ -1010,11 +1077,30 @@ create_new_project_workflow() {
   echo "  x) ← Back to Main Menu"
   read -rp "Choice (1-3 or x): " choice
 
-  case "$choice" in
-    1) _create_with_new_remote ;;
+   case "$choice" in
+     1) local project_name visibility platform
+        project_name=$(_prompt_project_name) || { echo -e "${YELLOW}Cancelled.${NC}"; return; }
+        platform=$(select_platforms "Select platform for new repository:" "false") || { echo -e "${YELLOW}Cancelled.${NC}"; return; }
+        platform=$(echo "$platform" | tr -d '[:space:]')  # Clean whitespace
+        visibility=$(_prompt_visibility) || { echo -e "${YELLOW}Cancelled.${NC}"; return; }
+
+        # Summary and confirmation
+        echo ""
+        echo -e "${BLUE}=== SUMMARY ===${NC}"
+        echo -e "  Project: ${CYAN}$project_name${NC}"
+        echo -e "  Platform: ${CYAN}$platform${NC}"
+        echo -e "  Visibility: ${CYAN}$visibility${NC}"
+        echo ""
+
+        if ! confirm_action "Create this repository?"; then
+            echo -e "${YELLOW}Cancelled.${NC}"
+            return
+        fi
+
+        _create_with_new_remote "$project_name" "$visibility" "$platform" ;;
     2) _clone_existing_remote "standalone" ;;
     3) _create_local_only ;;
-    x|X) echo -e "${YELLOW}Cancelled.${NC}" return ;;
+    x|X) echo -e "${YELLOW}Cancelled.${NC}"; return ;;
     *) echo -e "${RED}Invalid choice.${NC}" ;;
   esac
 }
@@ -1024,7 +1110,9 @@ _create_with_new_remote() {
   local project_name="$1"
   local visibility="${2:-private}"
   local platform="$3"
-  local dir="$REMOTE_ROOT/$PLATFORM_WORK_DIR[$platform]/$project_name"
+
+  # Set up directory path
+  local dir="$REMOTE_ROOT/${PLATFORM_WORK_DIR[$platform]}/$project_name"
 
   # Validate inputs
   [[ -z "$project_name" ]] && { echo -e "${RED}❌ Project name required${NC}"; return 1; }
@@ -1044,63 +1132,21 @@ _create_with_new_remote() {
   fi
 
   # Create parent directory
-  if [[ "$DRY_RUN" != "true" ]]; then
   mkdir -p "$(dirname "$dir")" || { echo -e "${RED}❌ Failed to create parent directory${NC}"; return 1; }
-  else
-  DRY_RUN_ACTIONS+=("Create directory: $(dirname "$dir")")
-  fi
 
-  # Prepare payload
-  local payload_template="${PLATFORM_PAYLOAD_TEMPLATE[$platform]}"
-  local payload_visibility="$visibility"
-
-  # Apply visibility mapping if available
-  if [[ -n "${PLATFORM_VISIBILITY_MAP[$platform]}" ]]; then
-      local map_json="${PLATFORM_VISIBILITY_MAP[$platform]}"
-      local mapped_vis=$(echo "$map_json" | jq -r --arg vis "$visibility" '.[$vis] // empty' 2>/dev/null)
-      [[ -n "$mapped_vis" ]] && payload_visibility="$mapped_vis"
-  fi
-
-  # Build payload with proper visibility values
-  payload=$(echo "$payload_template" | \
-      sed "s/{repo}/$project_name/g; \
-          s/{owner}/$user_name/g; \
-          s/{private}/$( [[ "$visibility" == "private" ]] && echo "true" || echo "false" )/g; \
-          s/{visibility}/$payload_visibility/g")
-
-  # Create remote repository with cleanup on failure
-  local remote_created=false
-  echo -e "\n${BLUE}Creating repository on $platform...${NC}"
-  local response
-  response=$(platform_api_call "$platform" "${PLATFORM_REPO_CREATE_ENDPOINT[$platform]}" "POST" "$payload" 2>/dev/null)
-
-  if [[ $? -ne 0 ]]; then
-    echo -e "${RED}❌ Failed to create remote repository${NC}"
+  # Create remote repository using reusable function
+  local remote_url
+  echo ""
+  if ! remote_url=$(create_remote_repo "$platform" "$project_name" "$visibility" "$(git config --global user.name 2>/dev/null || echo 'default_user')"); then
+    echo -e "${RED}❌ Failed to create remote repository on $platform${NC}"
     return 1
   fi
-
-  # Extract remote URL
-  local remote_url
-  remote_url=$(echo "$response" | jq -r ".${PLATFORM_SSH_URL_FIELDS[$platform]//,/.}" 2>/dev/null | head -1)
-  [[ -z "$remote_url" ]] && remote_url=$(echo "$response" | jq -r '.ssh_url // .clone_url // .git_url' 2>/dev/null | head -1)
 
   if [[ -z "$remote_url" ]]; then
     echo -e "${RED}❌ Failed to get repository URL from API response${NC}"
-    # Cleanup: Attempt to delete the failed repository
-    echo -e "${YELLOW}Attempting to clean up partial repository...${NC}"
-    local owner
-    owner=$(echo "$response" | jq -r '.owner.login // .namespace.path' 2>/dev/null || echo "$(git config --global user.name)")
-    #  Construct proper DELETE endpoint (don't reuse check endpoint)
-    local delete_endpoint="${PLATFORM_REPO_CHECK_ENDPOINT[$platform]}"
-    delete_endpoint="${delete_endpoint//\{owner\}/$owner}"
-    delete_endpoint="${delete_endpoint//\{repo\}/$project_name}"
-
-    # Attempt to delete remote repository using proper endpoint
-    platform_api_call "$platform" "$delete_endpoint" "DELETE" >/dev/null
     return 1
   fi
 
-  remote_created=true
   echo -e "${GREEN}✓ Created on $platform${NC}"
   echo -e "  URL: ${CYAN}$remote_url${NC}"
 
@@ -1144,26 +1190,19 @@ _create_with_new_remote() {
       echo -e "${YELLOW}Remote may already exist. Try removing it first.${NC}"
       return 1
   fi
-  echo -e "  Added remote: ${CYAN}$platform${NC}"
-
-  echo -e "${BLUE}Pushing initial commit...${NC}"
-  if ! git push -u "$platform" "$default_branch" 2>&1 | head -20; then
-      echo -e "${RED}❌ Failed to push to remote${NC}"
-      echo -e "${YELLOW}Error details shown above. Attempting cleanup...${NC}"
-      _cleanup_failed_creation "$platform" "$project_name" "$remote_url"
-      return 1
-  fi
+   echo -e "  Added remote: ${CYAN}$platform${NC}"
+  
+  echo -e "${YELLOW}NOTE: Repository created but not pushed automatically.${NC}"
+  echo -e "${YELLOW}You can push manually later using:${NC}"
+  echo -e "      git push -u $platform $default_branch${NC}"
 
   local_created=true
-  echo -e "${GREEN}✓ Pushed initial commit${NC}"
+  echo -e "${GREEN}✓ Repository created${NC}"
 
-  # Create manifest
-  echo -e "\n${BLUE}Creating project manifest...${NC}"
-  local urls=()
-  urls["$platform"]="$remote_url"
-  create_multi_platform_manifest "$dir" "$project_name" urls "create_with_new_remote"
+  # NOTE: Manifest (REMOTE_STATE.yml) is only created for multi-platform projects
+  # For single platform, no manifest needed - the git remote tracks the connection
 
-  echo -e "\n${GREEN}✅ SUCCESS: Repository created on all platforms${NC}"
+  echo -e "\n${GREEN}✅ SUCCESS: Repository created${NC}"
   echo -e "  Local path: ${CYAN}$dir${NC}"
   echo -e "  Remote URL: ${CYAN}$remote_url${NC}"
 
@@ -1244,20 +1283,10 @@ _clone_existing_remote() {
   local repo_name=$(basename "$parsed_path")
 
   local host
-  if [[ "$first_url" =~ ^git@ ]]; then
-      host=$(echo "$first_url" | sed 's/git@\([^:]*\):.*/\1/')
-  else
-      host=$(echo "$first_url" | sed 's|https\?://\([^/]*\)/.*|\1|')
-  fi
+  host=$(extract_host_from_url "$first_url")
 
   local platform=""
-  for p in "${AVAILABLE_PLATFORMS[@]}"; do
-      if [[ "$host" == "${PLATFORM_REPO_DOMAIN[$p]}" ]] || [[ "$host" == "${PLATFORM_SSH_HOST[$p]}" ]]; then
-          platform="$p"
-          break
-      fi
-  done
-  [[ -z "$platform" ]] && { echo -e "${RED}Unknown platform for host: $host${NC}"; return 1; }
+  platform=$(detect_platform_from_url "$first_url") || { echo -e "${RED}Unknown platform for URL: $first_url${NC}"; return 1; }
 
   # --- PART 3: DECIDE DESTINATION DIRECTORY (THE NEW LOGIC) ---
   local dest_dir=""
@@ -1394,8 +1423,29 @@ convert_single_to_multi_platform() {
   confirm_action "Proceed with conversion?" || return
 
   # 6. Move to Multi-server
-  mv "$source_dir" "$dest_dir" || return
-  cd "$dest_dir" || return
+  if [[ -d "$dest_dir" ]]; then
+    echo -e "${YELLOW}Directory '$dest_dir' already exists.${NC}"
+    local overwrite_choice
+    read -rp "Do you want to overwrite it? (y/N): " overwrite_choice
+    if [[ "${overwrite_choice,,}" =~ ^y$ ]]; then
+      rm -rf "$dest_dir" || {
+        echo -e "${RED}❌ Failed to remove existing directory '$dest_dir'.${NC}"
+        return 1
+      }
+      echo -e "${GREEN}Removed existing directory '$dest_dir'.${NC}"
+    else
+      echo -e "${YELLOW}Aborting conversion.${NC}"
+      return 1
+    fi
+  fi
+  mv "$source_dir" "$dest_dir" || {
+    echo -e "${RED}❌ Failed to move '$source_dir' to '$dest_dir'.${NC}"
+    return 1
+  }
+  cd "$dest_dir" || {
+    echo -e "${RED}❌ Failed to change directory to '$dest_dir'.${NC}"
+    return 1
+  }
 
   # 7. Rename current remote (if it's "origin" or generic)
   echo -e "\n${BLUE}Configuring remotes...${NC}"
@@ -1406,29 +1456,15 @@ convert_single_to_multi_platform() {
     echo -e "${GREEN}✓ Renamed remote: origin → $current_platform${NC}"
   fi
 
-  # 8. Add additional remotes (skip first URL - it's the current one)
-  for ((i=1; i<${#urls[@]}; i++)); do
-    local url="${urls[$i]}"
-    local platform_name=""
+    # 8. Add additional remotes (skip first URL - it's the current one)
+    for ((i=1; i<${#urls[@]}; i++)); do
+        local url="${urls[$i]}"
+        local platform_name=""
 
-    # Detect platform from URL for naming
-    local host
-    if [[ "$url" =~ ^git@ ]]; then
-      host=$(echo "$url" | sed 's/git@\([^:]*\):.*/\1/')
-    else
-      host=$(echo "$url" | sed 's|https\?://\([^/]*\)/.*|\1|')
-    fi
+        # Detect platform from URL
+        platform_name=$(detect_platform_from_url "$url") || platform_name="remote$i"
 
-    for p in "${AVAILABLE_PLATFORMS[@]}"; do
-      if [[ "$host" == "${PLATFORM_REPO_DOMAIN[$p]}" ]] || [[ "$host" == "${PLATFORM_SSH_HOST[$p]}" ]]; then
-        platform_name="$p"
-        break
-      fi
-    done
-
-    [[ -z "$platform_name" ]] && platform_name="remote$i"
-
-    # Skip if remote already exists
+        # Skip if remote already exists
     if ! git remote | grep -q "^$platform_name$"; then
       git remote add "$platform_name" "$url"
       echo -e "${GREEN}✓ Added remote: $platform_name${NC}"
@@ -1441,19 +1477,9 @@ convert_single_to_multi_platform() {
   # Build platform_urls array
   declare -A platform_urls
   for url in "${urls[@]}"; do
-    local host
-    if [[ "$url" =~ ^git@ ]]; then
-      host=$(echo "$url" | sed 's/git@\([^:]*\):.*/\1/')
-    else
-      host=$(echo "$url" | sed 's|https\?://\([^/]*\)/.*|\1|')
-    fi
-
-    for p in "${AVAILABLE_PLATFORMS[@]}"; do
-      if [[ "$host" == "${PLATFORM_REPO_DOMAIN[$p]}" ]] || [[ "$host" == "${PLATFORM_SSH_HOST[$p]}" ]]; then
-        platform_urls["$p"]="$url"
-        break
-      fi
-    done
+      local p
+      p=$(detect_platform_from_url "$url") || p="unknown"
+      platform_urls["$p"]="$url"
   done
 
   create_multi_platform_manifest "$dest_dir" "$project_name" platform_urls "convert_single_to_multi"
@@ -1470,7 +1496,7 @@ convert_single_to_multi_platform() {
 
 ##### Convert a local project to remote project #####
 convert_local_to_remote_workflow() {
-  echo "DEBUG: DRY_RUN=$DRY_RUN"
+  # DEBUG: echo "DEBUG: DRY_RUN=$DRY_RUN"
   echo -e "\n${BLUE}=== BIND LOCAL PROJECT TO REMOTE ===${NC}"
 
   # === SELECT LOCAL PROJECT ===
@@ -1486,10 +1512,40 @@ convert_local_to_remote_workflow() {
 
   # Commit warning if any changes exist
   echo -e "\n${BLUE}=== Checking Repository Status ===${NC}"
-  if git -C "$source_dir" diff --quiet 2>/dev/null && git -C "$source_dir" diff --cached --quiet 2>/dev/null; then
-      echo -e "${GREEN}✓ No uncommitted changes${NC}"
+
+  # Fetch remote to get latest state
+  echo -e "${YELLOW}Fetching remote...${NC}"
+  if git -C "$source_dir" fetch --quiet 2>/dev/null; then
+    local remote_behind=0
+    local remote_ahead=0
+
+    # Check if local is behind/ahead of remote
+    if git -C "$source_dir" rev-list --left-right --count @{u}...HEAD 2>/dev/null | grep -qE '^[0-9]+ [0-9]+$'; then
+      remote_behind=$(git -C "$source_dir" rev-list --left-right --count @{u}...HEAD 2>/dev/null | cut -f1)
+      remote_ahead=$(git -C "$source_dir" rev-list --left-right --count @{u}...HEAD 2>/dev/null | cut -f2)
+    fi
+
+    # Show remote status
+    if [[ "$remote_behind" -gt 0 ]]; then
+      echo -e "${YELLOW}⚠️  Remote has $remote_behind new commit(s)${NC}"
+    fi
+    if [[ "$remote_ahead" -gt 0 ]]; then
+      echo -e "${YELLOW}⚠️  You have $remote_ahead local commit(s) not pushed${NC}"
+    fi
+    if [[ "$remote_behind" -eq 0 && "$remote_ahead" -eq 0 ]]; then
+      echo -e "${GREEN}✓ Local and remote are in sync${NC}"
+    fi
   else
-      echo -e "${YELLOW}⚠️  Uncommitted changes present (will be preserved)${NC}"
+    echo -e "${YELLOW}⚠️  Could not fetch remote${NC}"
+  fi
+
+  # Show uncommitted changes
+  if git -C "$source_dir" diff --quiet 2>/dev/null && git -C "$source_dir" diff --cached --quiet 2>/dev/null; then
+    echo -e "${GREEN}✓ No uncommitted changes${NC}"
+  else
+    echo -e "${YELLOW}⚠️  Uncommitted changes present (will be preserved)${NC}"
+    echo -e "${YELLOW}Changes:${NC}"
+    git -C "$source_dir" diff --stat 2>/dev/null
   fi
 
   # === CHOOSE BINDING METHOD ===
@@ -1536,10 +1592,14 @@ convert_local_to_remote_workflow() {
         dest_dir="$REMOTE_ROOT/Multi-server/$project_name"
     fi
 
+    # Create destination directory before attempting git operations
+    execute_safe "Create destination directory" mkdir -p "$dest_dir"
+
     # Ask for visibility
     echo -e "\n${YELLOW}Repository visibility for new repositories?${NC}"
-    echo "  1) Private  2) Public"
-    read -rp "Choice (1-2): " visibility_choice
+    echo "  1) Private"
+    echo "  2) Public"
+    read -rp "Select visibility (1-2): " visibility_choice
 
     if [[ "$visibility_choice" != "1" && "$visibility_choice" != "2" ]]; then
       echo -e "${YELLOW}Invalid visibility choice.${NC}"
@@ -1556,8 +1616,22 @@ convert_local_to_remote_workflow() {
       warn_similar_remote_repos "$platform" "$project_name" "$user_name"
     done
 
-    # === OPTION 2: CONNECT TO EXISTING REPOSITORY ===
-    elif [[ "$bind_choice" == "2" ]]; then
+    # Summary and confirmation
+    echo ""
+    echo -e "${BLUE}=== SUMMARY ===${NC}"
+    echo -e "  Project: ${CYAN}$project_name${NC}"
+    echo -e "  Platform(s): ${CYAN}$platforms${NC}"
+    echo -e "  Visibility: ${CYAN}$visibility${NC}"
+    echo -e "  Destination: ${CYAN}$dest_dir${NC}"
+    echo ""
+
+    if ! confirm_action "Create repository and bind project?"; then
+      echo -e "${YELLOW}Cancelled.${NC}"
+      return 1
+    fi
+
+  # === OPTION 2: CONNECT TO EXISTING REPOSITORY ===
+  elif [[ "$bind_choice" == "2" ]]; then
     echo -e "\n${YELLOW}Enter repository URLs (one per line, empty line to finish):${NC}"
     echo "Examples: git@github.com:user/repo.git"
 
@@ -1616,7 +1690,11 @@ convert_local_to_remote_workflow() {
 
         # COPY files, not move
         echo -e "${BLUE}Copying files...${NC}"
-        cp -r "$source_dir/." . 2>/dev/null
+        if command -v rsync &>/dev/null; then
+          rsync -av --exclude='.git' "$source_dir/" . 2>/dev/null
+        else
+          (cd "$source_dir" && find . -name '.git' -prune -o -print0 | cpio -pdm0 .) 2>/dev/null
+        fi
 
         # === GIT STATUS & COMMIT ===
         echo -e "\n${BLUE}Repository status:${NC}"
@@ -1682,31 +1760,70 @@ convert_local_to_remote_workflow() {
         return 0
     fi
 
+  if [[ "$bind_choice" == "1" ]]; then
+    echo -e "\n${BLUE}Copying your local files...${NC}"
+    echo -e "${YELLOW}This will copy files from:${NC}"
+    echo -e "  Source: $source_dir"
+    echo -e "  Destination: $dest_dir"
 
-  # === GIT SETUP ===
+    if confirm_action "Copy local files (overwriting any conflicts)?"; then
+      echo -e "${BLUE}Copying files...${NC}"
+      if command -v rsync &>/dev/null; then
+        rsync -av --exclude='.git' "$source_dir/" "$dest_dir/" || {
+          echo -e "${RED}❌ Failed to copy files with rsync${NC}"
+          return 1
+        }
+      else
+        (cd "$source_dir" && find . -name '.git' -prune -o -print0 | cpio -pdm0 "$dest_dir") || {
+          echo -e "${RED}❌ Failed to copy files${NC}"
+          return 1
+        }
+      fi
+      echo -e "${GREEN}✅ Files copied successfully${NC}"
+    else
+      echo -e "${YELLOW}⚠️  Skipping file copy${NC}"
+    fi
+  fi
+
+
   cd "$dest_dir" || {
-    echo -e "${RED}Failed to change to destination directory.${NC}"
+    echo -e "${RED}❌ Failed to change to destination directory: $dest_dir${NC}"
     return 1
   }
 
   # Initialize git if needed
-    if [[ "$DRY_RUN" != "true" ]]; then
-        if [[ ! -d ".git" ]]; then
-            echo -e "${YELLOW}Initializing git repository...${NC}"
-            git init
-            git add .
-            git commit -m "Initial commit from repo-crafter"
-            echo -e "${GREEN}✅ Git repository initialized${NC}"
-        fi
-    else
-        echo -e "${YELLOW}[DRY RUN] Would check/initialize git repository${NC}"
+  if [[ "$DRY_RUN" != "true" ]]; then
+    if [[ ! -d ".git" ]]; then
+      echo -e "${YELLOW}Initializing git repository...${NC}"
+      local default_branch=$(detect_current_branch)
+      git init -b "$default_branch" >/dev/null 2>&1 || {
+        echo -e "${RED}❌ Failed to initialize git repository${NC}"
+        return 1
+      }
+      echo -e "${GREEN}✅ Git repository initialized${NC}"
     fi
+  else
+    echo -e "${YELLOW}[DRY RUN] Would check/initialize git repository${NC}"
+  fi
 
-  if ! check_local_exists "$dest_dir"; then
-    echo -n "Initializing git repository... "
-    local default_branch=$(detect_current_branch)
-    git init -b "$default_branch" >/dev/null 2>&1
-    echo -e "${GREEN}✓${NC}"
+  if [[ "$bind_choice" == "1" ]]; then
+    echo -e "\n${BLUE}Repository status:${NC}"
+    git status --short
+
+    echo -e "\n${BLUE}Commit changes?${NC}"
+    echo "  y) Yes, commit now"
+    echo "  n) No, I'll handle manually"
+    read -rp "Choice (y/n): " commit_choice
+
+    if [[ "$commit_choice" =~ ^[Yy]$ ]]; then
+      read -rp "Commit message: " commit_msg
+      [[ -z "$commit_msg" ]] && commit_msg="Initial commit with local changes from $project_name"
+      git add .
+      git commit -m "$commit_msg"
+      echo -e "${GREEN}✅ Changes committed${NC}"
+    else
+      echo -e "${YELLOW}⚠️  Changes not committed. Run 'git add . && git commit' when ready.${NC}"
+    fi
   fi
 
   # === REMOTE CONFIGURATION ===
@@ -1730,17 +1847,29 @@ convert_local_to_remote_workflow() {
 
           # Push initial code
           if [[ "$DRY_RUN" != "true" ]]; then
-            if confirm_action "Push initial code to $platform?" "y" "Push"; then
-              execute_dangerous "Initial push" git push -u "$platform" main
-            fi
+            echo -e "${YELLOW}NOTE: Repository created but not pushed automatically.${NC}"
+            echo -e "${YELLOW}You can push manually later using:${NC}"
+            echo -e "      git push -u $platform $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")${NC}"
           else
             echo -e "${YELLOW}⚠️  DRY-RUN: Would ask about pushing initial code.${NC}"
           fi
         fi
       else
         echo -e "${RED}✗ Failed to create repository${NC}"
+        return 1
       fi
     done
+
+    # Create manifest for multi-platform projects
+    if [[ ${#platform_array[@]} -gt 1 ]]; then
+      echo -e "\n${BLUE}Creating project manifest...${NC}"
+      # Collect all remote URLs
+      declare -A platform_urls
+      for platform in "${platform_array[@]}"; do
+        platform_urls["$platform"]=$(git remote get-url "$platform" 2>/dev/null || echo "")
+      done
+      create_multi_platform_manifest "$dest_dir" "$project_name" platform_urls "convert_local_to_remote"
+    fi
 
   elif [[ "$bind_choice" == "2" ]]; then
     # CONNECT TO EXISTING REPOSITORY
@@ -1974,9 +2103,19 @@ _delete_both() {
   platform=$(git remote | head -1)
   user_name=$(git config --global user.name)
 
-  # Delete remote via API - use execute_dangerous for confirmation
+  # Delete remote via API
   echo -e "\n${YELLOW}Deleting remote repository...${NC}"
-  if execute_dangerous "Delete remote repository" platform_api_call "$platform" "/repos/$user_name/$project_name" "DELETE" >/dev/null; then
+
+  # Get owner from API (more reliable than git config)
+  local owner
+  owner=$(git remote get-url "$platform" 2>/dev/null | sed -E 's/.*[:/]([^:]*\/[^.]*)\.git/\1/' | cut -d/ -f1)
+
+  # Build delete endpoint from config
+  local delete_endpoint="${PLATFORM_REPO_DELETE_ENDPOINT[$platform]}"
+  delete_endpoint="${delete_endpoint//\{owner\}/$owner}"
+  delete_endpoint="${delete_endpoint//\{repo\}/$project_name}"
+
+  if execute_dangerous "Delete remote repository" platform_api_call "$platform" "$delete_endpoint" "DELETE" >/dev/null; then
     echo -e "${GREEN}✅ Remote repository deleted${NC}"
   else
     echo -e "${RED}❌ Failed to delete remote repository${NC}"
@@ -2433,6 +2572,52 @@ parse_git_url() {
 }
 
 
+# Detect platform from a git URL
+# Returns: platform name or empty string if not found
+detect_platform_from_url() {
+    local url="$1"
+    [[ -z "$url" ]] && return 1
+
+    # Extract host from URL
+    local host=""
+    if [[ "$url" =~ ^git@([^:]+): ]]; then
+        host="${BASH_REMATCH[1]}"
+    elif [[ "$url" =~ ^https?://([^/]+)/ ]]; then
+        host="${BASH_REMATCH[1]}"
+    elif [[ "$url" =~ ^[^@]+@([^:/]+) ]]; then
+        host="${BASH_REMATCH[1]}"
+    fi
+
+    [[ -z "$host" ]] && return 1
+
+    # Match against known platforms
+    for p in "${AVAILABLE_PLATFORMS[@]}"; do
+        if [[ "$host" == "${PLATFORM_REPO_DOMAIN[$p]}" ]] || [[ "$host" == "${PLATFORM_SSH_HOST[$p]}" ]]; then
+            echo "$p"
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+
+# Extract host from a git URL
+# Returns: hostname or empty string
+extract_host_from_url() {
+    local url="$1"
+    [[ -z "$url" ]] && return 1
+
+    if [[ "$url" =~ ^git@([^:]+): ]]; then
+        echo "${BASH_REMATCH[1]}"
+    elif [[ "$url" =~ ^https?://([^/]+)/ ]]; then
+        echo "${BASH_REMATCH[1]}"
+    elif [[ "$url" =~ ^[^@]+@([^:/]+) ]]; then
+        echo "${BASH_REMATCH[1]}"
+    fi
+}
+
+
 # Preview operation and return to menu if in dry-run mode
 preview_and_abort_if_dry() {
   if [[ "$DRY_RUN" != "true" ]]; then
@@ -2592,11 +2777,26 @@ _prompt_project_name() {
 }
 
 # Prompt for visibility (private/public)
+# Prompts go to stderr (user sees), result to stdout (captured)
 _prompt_visibility() {
-  echo -e "\n${YELLOW}Repository visibility?${NC}"
-  echo "  1) Private  2) Public"
-  read -rp "Choice (1-2): " choice
-  [[ "$choice" == "1" ]] && echo "private" || echo "public"
+  # Prompts to stderr so user sees them
+  echo "" >&2
+  echo "Repository visibility?" >&2
+  echo "  1) Private  2) Public" >&2
+  echo "" >&2
+  echo -n "Choice (1-2): " >&2
+
+  # Read from stdin
+  read choice
+
+  echo "" >&2
+
+  # Result to stdout (for command substitution)
+  if [[ "$choice" == "1" ]]; then
+    echo "private"
+  else
+    echo "public"
+  fi
 }
 
 # Select project from directory
@@ -2623,9 +2823,10 @@ _select_project_from_dir() {
         return 1
     }
 
-    # SHOW THE LIST DIRECTLY TO TERMINAL (not captured by command substitution)
+    # Show the list to stderr (so user sees it)
     {
-        echo -e "\n${BLUE}$prompt${NC}"
+        echo ""
+        echo -e "${BLUE}$prompt${NC}"
         echo -e "${YELLOW}Found ${#projects[@]} project(s):${NC}\n"
 
         for i in "${!projects[@]}"; do
@@ -2653,20 +2854,19 @@ _select_project_from_dir() {
             echo -e "      Size: $size | Git: $git_info"
             echo ""
         done
-    } > /dev/tty  # Send display directly to terminal
+    } >&2
 
-    # Get selection from terminal
+    # Get selection from stdin, fallback to /dev/tty if not a terminal
     while true; do
-        read -rp "Select project (1-${#projects[@]}) or 'x' to cancel: " choice </dev/tty
+        if [[ -t 0 ]]; then
+            read -rp "Select project (1-${#projects[@]}) or 'x' to cancel: " choice
+        else
+            read -rp "Select project (1-${#projects[@]}) or 'x' to cancel: " choice </dev/tty
+        fi
 
         [[ "$choice" =~ ^[xX]$ ]] && {
             echo -e "${YELLOW}Cancelled.${NC}" >&2
             return 1
-        }
-
-        [[ "$choice" =~ ^[xX]$ ]] && {
-            echo -e "${YELLOW}Cancelled.${NC}" >&2
-            return 1  # Explicit return
         }
 
         if [[ ! "$choice" =~ ^[0-9]+$ ]]; then
@@ -2832,6 +3032,7 @@ main_menu() {
 
 # ======================= DRY-RUN AND PLATFORM-TESTING CONFIGURATION ==============================
 DRY_RUN=false  # Set to true via --dry-run flag
+DEBUG_MODE=false  # Set to true to see API calls with half-masked tokens
 
 # Parse command line arguments (before any operations)
 parse_args() {
@@ -2845,6 +3046,7 @@ parse_args() {
             echo "OPTIONS:"
             echo "    --help, -h      Show this help message"
             echo "    --dry-run, -n   Preview operations without executing"
+            echo "    --debug, -d     Show API calls with half-masked tokens"
             echo "    --test, -t      Run configuration tests and exit"
             echo "    --version       Show version and license info"
             echo ""
@@ -2867,6 +3069,10 @@ parse_args() {
             DRY_RUN=true
             echo -e "${YELLOW}=== DRY-RUN MODE (preview only) ===${NC}"
             ;;
+        --debug|-d)
+            DEBUG_MODE=true
+            echo -e "${YELLOW}=== DEBUG MODE ENABLED (API calls will be shown with masked tokens) ===${NC}"
+            ;;
         --test|-t)
             if ! load_platform_config; then exit 1; fi
             test_platform_config
@@ -2880,7 +3086,7 @@ parse_args "$@"
 main() {
     # 1. Check for essential tools
     local required_tools=(git curl jq ssh envsubst tr)
-    local optional_tools=(yq-go)
+    local optional_tools=(yq)
 
     echo -n "Checking required tools... "
 
