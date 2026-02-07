@@ -288,8 +288,6 @@ test_platform_config() {
         check_ssh_auth "${PLATFORM_SSH_HOST[$platform]}" "$platform" || echo -e "${YELLOW}⚠️  SSH test failed but continuing...${NC}"
     done
 
-    fi
-
     echo ""
     read -rp "Press Enter to continue..." -n 1
     echo ""
@@ -2711,30 +2709,25 @@ EOF
     echo ""
   } > "$dir/REMOTE_STATE.yml"
 
-  # Add machine-readable YAML section
-  yq -n --arg name "$name" \
-     --arg user "$user_name" \
-     --arg action "$action_type" \
-     --arg branch "$branch" \
-     --arg commit "$commit_hash" \
-     --arg timestamp "$(date -Iseconds)" \
-  '{
-    metadata: {
-      manifest_version: "1.0",
-      created: $timestamp,
-      last_updated: $timestamp,
-      project_name: $name,
-      maintainer: $user,
-      last_action: $action,
-      last_action_timestamp: $timestamp
-    },
-    local_state: {
-      primary_branch: $branch,
-      head_commit: $commit,
-      project_path: "'"$dir"'"
-    },
-    platforms: {}
-  }' >> "$dir/REMOTE_STATE.yml"
+  local timestamp
+  timestamp=$(date -Iseconds)
+
+  # Add machine-readable YAML section using yq with shell variable expansion
+  yq e -n '.metadata = {}' -i "$dir/REMOTE_STATE.yml"
+  yq e '.metadata.manifest_version = "1.0"' -i "$dir/REMOTE_STATE.yml"
+  yq e ".metadata.created = \"$timestamp\"" -i "$dir/REMOTE_STATE.yml"
+  yq e ".metadata.last_updated = \"$timestamp\"" -i "$dir/REMOTE_STATE.yml"
+  yq e ".metadata.project_name = \"$name\"" -i "$dir/REMOTE_STATE.yml"
+  yq e ".metadata.maintainer = \"$user_name\"" -i "$dir/REMOTE_STATE.yml"
+  yq e ".metadata.last_action = \"$action_type\"" -i "$dir/REMOTE_STATE.yml"
+  yq e ".metadata.last_action_timestamp = \"$timestamp\"" -i "$dir/REMOTE_STATE.yml"
+
+  yq e -n '.local_state = {}' -i "$dir/REMOTE_STATE.yml"
+  yq e ".local_state.primary_branch = \"$branch\"" -i "$dir/REMOTE_STATE.yml"
+  yq e ".local_state.head_commit = \"$commit_hash\"" -i "$dir/REMOTE_STATE.yml"
+  yq e ".local_state.project_path = \"$dir\"" -i "$dir/REMOTE_STATE.yml"
+
+  yq e -n '.platforms = {}' -i "$dir/REMOTE_STATE.yml"
 
   # Add each platform's details
   for platform in "${!urls_ref[@]}"; do
@@ -2742,24 +2735,17 @@ EOF
     local repo_check_endpoint="${PLATFORM_REPO_CHECK_ENDPOINT[$platform]:-}"
     local repo_create_endpoint="${PLATFORM_REPO_CREATE_ENDPOINT[$platform]:-}"
 
-    yq -i --arg platform "$platform" \
-        --arg ssh_url "$ssh_url" \
-        --arg check_endpoint "$repo_check_endpoint" \
-        --arg create_endpoint "$repo_create_endpoint" \
-        --arg branch "$branch" \
-        --arg commit "$commit_hash" \
-        --arg timestamp "$(date -Iseconds)" \
-    '.platforms[$platform] = {
-      remote_name: $platform,
-      ssh_url: $ssh_url,
-      api_config_snapshot: {
-        repo_check_endpoint: $check_endpoint,
-        repo_create_endpoint: $create_endpoint
-      },
-      branch_mapping: { ($branch): $commit },
-      last_sync_status: "created",
-      last_synced: $timestamp
-    }' "$dir/REMOTE_STATE.yml"
+    # Create platform entry with direct variable expansion
+    yq e -n ".platforms.$platform = {}" -i "$dir/REMOTE_STATE.yml"
+    yq e ".platforms.$platform.remote_name = \"$platform\"" -i "$dir/REMOTE_STATE.yml"
+    yq e ".platforms.$platform.ssh_url = \"$ssh_url\"" -i "$dir/REMOTE_STATE.yml"
+    yq e -n ".platforms.$platform.api_config_snapshot = {}" -i "$dir/REMOTE_STATE.yml"
+    yq e ".platforms.$platform.api_config_snapshot.repo_check_endpoint = \"$repo_check_endpoint\"" -i "$dir/REMOTE_STATE.yml"
+    yq e ".platforms.$platform.api_config_snapshot.repo_create_endpoint = \"$repo_create_endpoint\"" -i "$dir/REMOTE_STATE.yml"
+    yq e -n ".platforms.$platform.branch_mapping = {}" -i "$dir/REMOTE_STATE.yml"
+    yq e ".platforms.$platform.branch_mapping.\"$branch\" = \"$commit_hash\"" -i "$dir/REMOTE_STATE.yml"
+    yq e ".platforms.$platform.last_sync_status = \"created\"" -i "$dir/REMOTE_STATE.yml"
+    yq e ".platforms.$platform.last_synced = \"$timestamp\"" -i "$dir/REMOTE_STATE.yml"
   done
 
   echo -e "${GREEN}✓ Full manifest created${NC}"
